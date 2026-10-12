@@ -15,7 +15,7 @@ public final class CeleritasSettings {
     /**
      * Whether chunks the fog hides completely are drawn, as vanilla does: at the corners of the render distance they
      * show as fog-coloured shapes against the sky. Celeritas otherwise searches a circle of the render distance and
-     * skips sections behind the fog (fog occlusion), which leaves about a fifth fewer sections to draw.
+     * skips sections behind the fog (fog occlusion): 6 to 17% fewer sections to draw in Hestia's benchmark scenes.
      */
     public static volatile boolean drawFoggedChunks = false;
 
