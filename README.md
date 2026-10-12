@@ -60,11 +60,29 @@ every change. In short (2026-10-12):
 - **Block entities** are drawn only for visible sections, as in vanilla (beacon-style ones that draw off screen also
   globally, as in vanilla); upstream's 1.8.9 branch drew every loaded block entity every frame.
 - **Visibility inside a section** comes from vanilla 1.8.9's own occlusion graph instead of upstream's copy of
-  Minecraft 1.16's code; blocks are read through vanilla's own chunk-compile region cache.
+  Minecraft 1.16's code.
+- **Chunk snapshots (as in Celeritas's 1.12.2 version):** builder threads no longer read the live world, which the main
+  thread keeps changing; upstream's 1.8.9 branch read the live chunk. When a rebuild task is made, the main thread hands
+  it copies of the 3x3x3 sections around its section (block states, block and sky light, column biomes, block
+  entities), cached and shared between neighbouring tasks; a copy is dropped when its section is scheduled for a
+  rebuild (every block, light or chunk data change schedules the sections around it), when its chunk or section object
+  is replaced, or after 5 s unused. The 1.12.2 version keeps references to the live section; a 1.8.9 section is small
+  (12 KiB), so this one copies it. The task's own section's block entities are listed fresh for each task, since the
+  client creates some (a sign's text packet does) without scheduling a rebuild.
+- **Reads give vanilla's answers:** `WorldSlice` follows vanilla's chunk-compile region cache (`RenderChunkRegion`,
+  `WorldRegion`, `WorldChunk.getLight`) with the same per-position block state and light caches. Two differences: a
+  light read applies each call's minimum block light instead of reusing the first call's, and biomes below y 0 or above
+  255 are the column's (vanilla asks the biome generator there; nothing there gets tinted). Biome colours
+  (grass, leaves, water) average vanilla's 3x3 columns with vanilla's rounding, but each column's colour is worked out
+  once per task instead of nine times per tinted face (`BiomeColorsMixin`); celeritas-common's box blur rounds twice
+  and could be off by one per channel. Hestia's "Smooth biomes" off still gives each block its own column's colour.
+- **F3** shows the chunk build rate and average build time, the number of section copies and the main thread's time per
+  rebuild task for taking them.
 - **Empty chunk sections** get no rebuild tasks (as in Celeritas's 1.12.2 version).
 - **Fewer per-frame allocations:** reused matrices, fog colour array, frustum copies, entity BlockPos and block entity
   context; indexed loops instead of iterators. A few remain in celeritas-common's own API (the viewport, camera state
-  and shader option objects each frame).
+  and shader option objects each frame). Rebuild tasks reuse their thread's slice instead of a new 64 KiB region cache
+  each, and look for missing block entities without a new BlockPos per block.
 - **Small:** the render section manager calls celeritas-common's non-deprecated constructor (no shadow pass, as the
   deprecated one did).
 - **Dropped:** the mixins and helpers for versions before 1.8; `MinecraftMixin` (beta 1.7.3 window fixes; 1.8.9 already

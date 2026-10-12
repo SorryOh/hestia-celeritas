@@ -4,7 +4,8 @@ package org.taumc.celeritas.impl.render.terrain.compile.task;
 // - Block entities go to the section's culled list, as vanilla draws them only for visible sections; ones whose
 //   renderer draws off screen (beacons) also go to the global list, as in vanilla. Upstream's 1.8.9 branch put every
 //   block entity in the global list, so all of them were drawn every frame.
-// - Blocks are read through vanilla's own region cache (RenderChunkRegion), as vanilla's chunk compile does.
+// - Blocks, light, biomes and block entities are read from the task's section copies (WorldSlice), never from the
+//   live world, which the main thread keeps changing; upstream's 1.8.9 branch read the live chunk.
 // - Visibility comes from vanilla 1.8.9's own ChunkOcclusionGraph instead of upstream's copy of Minecraft 1.16's.
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
@@ -16,10 +17,8 @@ import net.minecraft.client.render.block.entity.BlockEntityRenderer;
 import net.minecraft.client.render.vertex.DefaultVertexFormat;
 import net.minecraft.client.render.world.ChunkOcclusionGraph;
 import net.minecraft.client.render.world.OcclusionData;
-import net.minecraft.client.render.world.RenderChunkRegion;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.world.chunk.WorldChunk;
 import org.embeddedt.embeddium.impl.render.chunk.RenderSection;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildBuffers;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildContext;
@@ -35,6 +34,7 @@ import org.embeddedt.embeddium.impl.util.task.CancellationToken;
 import org.joml.Vector3d;
 import org.lwjgl.opengl.GL11C;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
+import org.taumc.celeritas.impl.world.WorldSlice;
 import org.taumc.celeritas.impl.world.cloned.ChunkRenderContext;
 
 public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> {
@@ -53,6 +53,17 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
     @Override
     public ChunkBuildOutput execute(ChunkBuildContext context, CancellationToken cancellationToken) {
         PrimitiveChunkBuildContext buildContext = (PrimitiveChunkBuildContext)context;
+        WorldSlice slice = buildContext.slice;
+        slice.copyData(this.renderContext);
+
+        try {
+            return this.build(buildContext, slice, cancellationToken);
+        } finally {
+            slice.reset();
+        }
+    }
+
+    private ChunkBuildOutput build(PrimitiveChunkBuildContext buildContext, WorldSlice slice, CancellationToken cancellationToken) {
         var renderData = new MinecraftBuiltRenderSectionData<Object, BlockEntity>();
         ChunkOcclusionGraph occluder = new ChunkOcclusionGraph();
 
@@ -67,14 +78,10 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         int maxY = minY + 16;
         int maxZ = minZ + 16;
 
-        var world = buildContext.world;
-        var chunk = world.getChunkAt(this.render.getChunkX(), this.render.getChunkZ());
         var tesselator = buildContext.tesselator;
 
         // Initialise with minX/minY/minZ so initial getBlockState crash context is correct
         var blockPos = new BlockPos.Mutable(minX, minY, minZ);
-        // The same region vanilla's chunk compile reads: the section and one block around it.
-        var region = new RenderChunkRegion(world, new BlockPos(minX - 1, minY - 1, minZ - 1), new BlockPos(maxX, maxY, maxZ), 1);
         var renderBlocks = Minecraft.getInstance().getBlockRenderDispatcher();
         var blockEntityRenderers = BlockEntityRenderDispatcher.INSTANCE;
 
@@ -90,7 +97,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                     for (int x = minX; x < maxX; x++) {
                         blockPos.set(x, y, z);
 
-                        var blockState = chunk.getBlockState(blockPos);
+                        var blockState = slice.getBlockState(x, y, z);
                         var block = blockState.getBlock();
 
                         if (block == Blocks.AIR) {
@@ -98,7 +105,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                         }
 
                         if (block.hasBlockEntity()) {
-                            BlockEntity blockEntity = chunk.getBlockEntity(blockPos, WorldChunk.BlockEntityCreationType.CHECK);
+                            BlockEntity blockEntity = slice.getBlockEntity(blockPos);
                             if (blockEntity != null) {
                                 BlockEntityRenderer<BlockEntity> renderer = blockEntityRenderers.getRenderer(blockEntity);
                                 if (renderer != null) {
@@ -113,7 +120,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                         var pass = block.getRenderLayer();
 
                         tesselator.begin(GL11C.GL_QUADS, DefaultVertexFormat.BLOCK);
-                        renderBlocks.render(blockState, blockPos, region, tesselator);
+                        renderBlocks.render(blockState, blockPos, slice, tesselator);
                         tesselator.end();
                         buildContext.copyRawBuffer(buildContext.rawVertexData(), tesselator.getVertexCount(), buffers, buffers.getRenderPassConfiguration().getMaterialForRenderType(pass));
                         tesselator.clear();

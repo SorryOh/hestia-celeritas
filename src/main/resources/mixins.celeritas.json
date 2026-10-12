@@ -4,6 +4,7 @@
   "package": "org.taumc.celeritas.mixin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "core.BiomeColorsMixin",
     "core.ClientChunkCacheAccessor",
     "core.DebugOverlayMixin",
     "core.FrustumCullerMixin",

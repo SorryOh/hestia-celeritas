@@ -3,7 +3,8 @@ package org.taumc.celeritas.impl.render.terrain;
 // Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. Empty chunk sections count as visually empty (as
 // in Celeritas's 1.12.2 version), so they get no rebuild tasks; upstream's 1.8.9 branch only skipped empty chunks. The
 // camera block lookup reuses one BlockPos. No sky-light section list (pre-1.8 only). The constructor call names the
-// shadow pass (none) instead of using the deprecated overload that does the same.
+// shadow pass (none) instead of using the deprecated overload that does the same. Rebuild tasks get copies of the
+// sections around theirs (WorldSlice.prepare, cached as in Celeritas's 1.12.2 version), and F3 shows the build rate.
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -23,20 +24,28 @@ import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderInterface;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderTextureSlot;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexType;
 import org.embeddedt.embeddium.impl.render.viewport.Viewport;
-import org.embeddedt.embeddium.impl.util.position.SectionPos;
 import org.jetbrains.annotations.Nullable;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.render.terrain.compile.task.ChunkBuilderMeshingTask;
 import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
+import org.taumc.celeritas.impl.world.WorldSlice;
 import org.taumc.celeritas.impl.world.cloned.ChunkRenderContext;
+import org.taumc.celeritas.impl.world.cloned.ClonedChunkSectionCache;
+
+import java.util.Collection;
 
 public class PrimitiveRenderSectionManager extends RenderSectionManager {
     private final World world;
     private final BlockPos.Mutable cameraBlockPos = new BlockPos.Mutable();
+    private final BlockPos.Mutable blockEntityPos = new BlockPos.Mutable();
+    private final ClonedChunkSectionCache sectionCache;
+    // How long taking a rebuild's section copies takes on the render thread, averaged.
+    private double prepareNanos;
 
     public PrimitiveRenderSectionManager(RenderPassConfiguration<?> configuration, World world, int renderDistance, CommandList commandList, int minSection, int maxSection, int requestedThreads) {
         super(configuration, () -> new PrimitiveChunkBuildContext(world, configuration), ChunkRenderer::new, renderDistance, commandList, minSection, maxSection, requestedThreads, false);
         this.world = world;
+        this.sectionCache = new ClonedChunkSectionCache(world);
     }
 
     public static PrimitiveRenderSectionManager create(ChunkVertexType vertexType, World world, int renderDistance, CommandList commandList) {
@@ -94,8 +103,13 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
         return section == null || section.isEmpty();
     }
 
+    /**
+     * Creates the block entities the section's blocks call for and doesn't have yet, as the chunk would when asked for
+     * them (vanilla's region asks with QUEUED, which creates them on a later tick).
+     */
     private void populateTileEntities(WorldChunk chunk, int sectionY) {
         WorldChunkSection section = chunk.getSections()[sectionY];
+        BlockPos.Mutable pos = this.blockEntityPos;
 
         int sectionBlockY = sectionY * 16;
         int chunkBlockX = chunk.chunkX * 16;
@@ -104,9 +118,9 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
             for (int z = 0; z < 16; z++) {
                 for (int x = 0; x < 16; x++) {
                     var block = section.getBlock(x, y, z);
-                    if (block.hasBlockEntity()) {
-                        var pos = new BlockPos(chunkBlockX + x, sectionBlockY + y, chunkBlockZ + z);
-                        chunk.getBlockEntity(pos, WorldChunk.BlockEntityCreationType.IMMEDIATE);
+                    if (block.hasBlockEntity() && chunk.getBlockEntity(pos.set(chunkBlockX + x, sectionBlockY + y, chunkBlockZ + z), WorldChunk.BlockEntityCreationType.CHECK) == null) {
+                        // The new block entity keeps the position it is created with, so it gets its own.
+                        chunk.getBlockEntity(new BlockPos(chunkBlockX + x, sectionBlockY + y, chunkBlockZ + z), WorldChunk.BlockEntityCreationType.IMMEDIATE);
                     }
                 }
             }
@@ -115,14 +129,20 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
 
     @Override
     protected @Nullable ChunkBuilderTask<ChunkBuildOutput> createRebuildTask(RenderSection render, int frame) {
-        if (isSectionVisuallyEmpty(render.getChunkX(), render.getChunkY(), render.getChunkZ())) {
+        int x = render.getChunkX(), y = render.getChunkY(), z = render.getChunkZ();
+
+        if (isSectionVisuallyEmpty(x, y, z)) {
             return null;
         }
 
-        ChunkRenderContext context = new ChunkRenderContext(new SectionPos(render.getChunkX(), render.getChunkY(), render.getChunkZ()));
+        WorldChunk chunk = this.world.getChunkAt(x, z);
+        populateTileEntities(chunk, y);
 
-        // TODO: This is a workaround until we properly snapshot chunk sections as is done in 1.12
-        populateTileEntities(this.world.getChunkAt(render.getChunkX(), render.getChunkZ()), render.getChunkY());
+        long start = System.nanoTime();
+        ChunkRenderContext context = WorldSlice.prepare(this.sectionCache, chunk, x, y, z);
+        long elapsed = System.nanoTime() - start;
+        // A moving average for F3, like celeritas-common's build times.
+        this.prepareNanos = this.prepareNanos == 0 ? elapsed : this.prepareNanos + 0.05 * (elapsed - this.prepareNanos);
 
         return new ChunkBuilderMeshingTask(render, context, frame, this.cameraPosition);
     }
@@ -130,6 +150,44 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
     @Override
     protected boolean allowImportantRebuilds() {
         return false;
+    }
+
+    // Every block, light or chunk data change schedules the sections around it, which drops their copies; that also
+    // holds for sections of chunks without a render section yet (the edge of the loaded area), whose copies other
+    // sections' rebuilds use.
+    @Override
+    protected void scheduleSectionForRebuild(int x, int y, int z, boolean important) {
+        this.sectionCache.invalidate(x, y, z);
+        super.scheduleSectionForRebuild(x, y, z, important);
+    }
+
+    @Override
+    protected void invalidateCachedSectionData(RenderSection section) {
+        this.sectionCache.invalidate(section.getChunkX(), section.getChunkY(), section.getChunkZ());
+        super.invalidateCachedSectionData(section);
+    }
+
+    @Override
+    public void updateChunks(boolean updateImmediately) {
+        this.sectionCache.cleanup();
+        super.updateChunks(updateImmediately);
+    }
+
+    @Override
+    public void destroy() {
+        super.destroy();
+        this.sectionCache.clear();
+    }
+
+    @Override
+    public Collection<String> getDebugStrings() {
+        Collection<String> strings = super.getDebugStrings();
+        var builds = this.jobMetricsTracker.getMetrics().get(ChunkBuildOutput.class);
+        if (builds != null) {
+            strings.add(String.format("Chunk builds: %d/s, %.2f ms avg", builds.getObservationsInLastTimeInterval(), builds.getAverageNanos(0) / 1.0e6));
+        }
+        strings.add(String.format("Section copies: %d, %.3f ms per rebuild", this.sectionCache.size(), this.prepareNanos / 1.0e6));
+        return strings;
     }
 
     private static class ChunkRenderer extends DefaultChunkRenderer {

@@ -16,3 +16,6 @@ accessible field net/minecraft/client/render/Camera PROJECTION_MATRIX_BUFFER Lja
 accessible field net/minecraft/client/render/GameRenderer fogRed F
 accessible field net/minecraft/client/render/GameRenderer fogGreen F
 accessible field net/minecraft/client/render/GameRenderer fogBlue F
+
+# BiomeColors' grass, foliage and water colour providers, which the chunk builds' colour cache tells apart
+accessible class net/minecraft/client/world/color/BiomeColors$ColorProvider
