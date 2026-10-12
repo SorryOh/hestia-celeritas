@@ -2,7 +2,8 @@ package org.taumc.celeritas.impl.render.terrain;
 
 // Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. The solid pass turns the alpha test off through
 // GlStateManager and restores its cached state afterwards; upstream called GL11 directly, which left GlStateManager's
-// cache saying the opposite of the real state.
+// cache saying the opposite of the real state. A solid material without mipmaps takes the opaque quads of cutout
+// blocks, and the configuration's default solid material is the solid one (upstream passed cutout_mipped).
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.client.render.block.BlockLayer;
@@ -22,6 +23,8 @@ import java.util.Map;
 public class PrimitiveRenderPassConfigurationBuilder {
     public static final TerrainRenderPass SOLID_PASS, CUTOUT_MIPPED_PASS, TRANSLUCENT_PASS;
     public static final Material SOLID_MATERIAL, CUTOUT_MATERIAL, CUTOUT_MIPPED_MATERIAL, TRANSLUCENT_MATERIAL;
+    /** The solid pass sampled without mipmaps, as vanilla draws the cutout layer: for cutout quads with opaque sprites. */
+    public static final Material SOLID_UNMIPPED_MATERIAL;
 
     private static final class PrimitivePipelineState implements TerrainRenderPass.PipelineState {
         private final boolean disableAlphaTest;
@@ -74,6 +77,7 @@ public class PrimitiveRenderPassConfigurationBuilder {
 
         TRANSLUCENT_MATERIAL = new Material(TRANSLUCENT_PASS, AlphaCutoffParameter.ZERO, true);
         SOLID_MATERIAL = new Material(SOLID_PASS, AlphaCutoffParameter.ZERO, true);
+        SOLID_UNMIPPED_MATERIAL = new Material(SOLID_PASS, AlphaCutoffParameter.ZERO, false);
         CUTOUT_MIPPED_MATERIAL = new Material(CUTOUT_MIPPED_PASS, AlphaCutoffParameter.ONE_TENTH, true);
         CUTOUT_MATERIAL = new Material(CUTOUT_MIPPED_PASS, AlphaCutoffParameter.ONE_TENTH, false);
     }
@@ -91,7 +95,7 @@ public class PrimitiveRenderPassConfigurationBuilder {
 
         return new RenderPassConfiguration<>(renderTypeToMaterialMap,
                 vanillaRenderStages,
-                CUTOUT_MIPPED_MATERIAL,
+                SOLID_MATERIAL,
                 CUTOUT_MIPPED_MATERIAL,
                 TRANSLUCENT_MATERIAL);
     }

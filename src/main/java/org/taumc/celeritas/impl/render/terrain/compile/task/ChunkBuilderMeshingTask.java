@@ -6,6 +6,8 @@ package org.taumc.celeritas.impl.render.terrain.compile.task;
 //   block entity in the global list, so all of them were drawn every frame.
 // - Blocks, light, biomes and block entities are read from the task's section copies (WorldSlice), never from the
 //   live world, which the main thread keeps changing; upstream's 1.8.9 branch read the live chunk.
+// - Block models go straight into Celeritas's buffers (BlockModelPipeline); only fluids still go through vanilla's
+//   renderer and a BufferBuilder that is copied afterwards, as upstream's 1.8.9 branch drew every block.
 // - Visibility comes from vanilla 1.8.9's own ChunkOcclusionGraph instead of upstream's copy of Minecraft 1.16's.
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
@@ -79,6 +81,8 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         int maxZ = minZ + 16;
 
         var tesselator = buildContext.tesselator;
+        var models = buildContext.models;
+        var passes = buffers.getRenderPassConfiguration();
 
         // Initialise with minX/minY/minZ so initial getBlockState crash context is correct
         var blockPos = new BlockPos.Mutable(minX, minY, minZ);
@@ -86,6 +90,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         var blockEntityRenderers = BlockEntityRenderDispatcher.INSTANCE;
 
         tesselator.offset(-minX, -minY, -minZ);
+        models.begin(buffers, minX, minY, minZ);
 
         try {
             for (int y = minY; y < maxY; y++) {
@@ -117,13 +122,21 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                             }
                         }
 
-                        var pass = block.getRenderLayer();
+                        var material = passes.getMaterialForRenderType(block.getRenderLayer());
 
-                        tesselator.begin(GL11C.GL_QUADS, DefaultVertexFormat.BLOCK);
-                        renderBlocks.render(blockState, blockPos, slice, tesselator);
-                        tesselator.end();
-                        buildContext.copyRawBuffer(buildContext.rawVertexData(), tesselator.getVertexCount(), buffers, buffers.getRenderPassConfiguration().getMaterialForRenderType(pass));
-                        tesselator.clear();
+                        // BlockRenderDispatcher.render's cases: 3 model, 1 fluid; the rest draw nothing here.
+                        switch (block.getRenderType()) {
+                            case 3 -> models.render(slice, renderBlocks.getModel(blockState, slice, blockPos), blockState, blockPos, material);
+                            case 1 -> {
+                                tesselator.begin(GL11C.GL_QUADS, DefaultVertexFormat.BLOCK);
+                                renderBlocks.render(blockState, blockPos, slice, tesselator);
+                                tesselator.end();
+                                buildContext.copyRawBuffer(buildContext.rawVertexData(), tesselator.getVertexCount(), buffers, material);
+                                tesselator.clear();
+                            }
+                            default -> {
+                            }
+                        }
 
                         if (block.isOpaque()) {
                             occluder.close(blockPos);

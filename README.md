@@ -76,13 +76,35 @@ every change. In short (2026-10-12):
   (grass, leaves, water) average vanilla's 3x3 columns with vanilla's rounding, but each column's colour is worked out
   once per task instead of nine times per tinted face (`BiomeColorsMixin`); celeritas-common's box blur rounds twice
   and could be off by one per channel. Hestia's "Smooth biomes" off still gives each block its own column's colour.
+- **Block models go straight into Celeritas's buffers** (`BlockModelPipeline`): upstream's 1.8.9 branch drew every
+  block with vanilla's renderer into a BufferBuilder and copied it afterwards; now only fluids do. Lighting stays
+  vanilla's exactly, because the pipeline calls vanilla's own ambient occlusion code (`BlockModelRenderer`'s
+  `AmbientOcclusionFace` and face shape helper) and repeats vanilla's tints, colour rounding and plant offsets,
+  including the flat-lighting path's offset hash that leaves out the height. Celeritas's 1.12.2 version has its own fast
+  renderer (off by default there) that lights with Celeritas's smooth-lighting pipeline, which looks different from
+  vanilla's.
+- **Faces hidden by slabs and stairs are culled** (`FaceOcclusion`): vanilla culls a face only against a full opaque
+  cube (and a slab against a matching slab). A face on the block boundary can only be seen from the neighbour's side,
+  so where a neighbouring slab's or stair's own boundary faces cover it (their closed boxes touch the boundary there),
+  it is left out: a block's side against a stair's back, stairs side by side, a slab against a stair, the ground under a
+  slab. Coverage is a 16 x 16 grid per side worked out from the neighbour's model (with the stair's shape), cached per
+  block state and dropped when the models reload. Only faces vanilla's models mark as culled faces qualify: leaves, for
+  example, have none in 1.8.9, so vanilla and this build both draw every leaf face.
+- **Opaque quads move to the solid pass:** quads from cutout and cutout-mipped blocks whose sprite has no transparent
+  pixel in any animation frame (measured when the sprite loads; `TextureAtlasSpriteMixin`) and whose texture
+  coordinates stay inside the sprite (`FaceBakeryMixin`, `BakedQuadMixin`) go to the solid pass, which skips the alpha
+  test, without mipmaps where the block's layer had none. In practice that is the grass block's top, bottom and side
+  faces; its tinted side overlay stays in the cutout pass and still draws over them. As in Celeritas's quad analyzer, a
+  face's quads only move when no opaque quad comes after a see-through one. The render pass configuration's default
+  solid material is now the solid one (upstream passed cutout_mipped).
 - **F3** shows the chunk build rate and average build time, the number of section copies and the main thread's time per
   rebuild task for taking them.
 - **Empty chunk sections** get no rebuild tasks (as in Celeritas's 1.12.2 version).
 - **Fewer per-frame allocations:** reused matrices, fog colour array, frustum copies, entity BlockPos and block entity
   context; indexed loops instead of iterators. A few remain in celeritas-common's own API (the viewport, camera state
   and shader option objects each frame). Rebuild tasks reuse their thread's slice instead of a new 64 KiB region cache
-  each, and look for missing block entities without a new BlockPos per block.
+  each, and look for missing block entities without a new BlockPos per block; the model pipeline reuses the face shape
+  arrays and ambient occlusion object that vanilla's renderer allocates for every block.
 - **Small:** the render section manager calls celeritas-common's non-deprecated constructor (no shadow pass, as the
   deprecated one did).
 - **Dropped:** the mixins and helpers for versions before 1.8; `MinecraftMixin` (beta 1.7.3 window fixes; 1.8.9 already

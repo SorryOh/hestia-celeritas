@@ -19,3 +19,9 @@ accessible field net/minecraft/client/render/GameRenderer fogBlue F
 
 # BiomeColors' grass, foliage and water colour providers, which the chunk builds' colour cache tells apart
 accessible class net/minecraft/client/world/color/BiomeColors$ColorProvider
+
+# Vanilla's ambient occlusion and face shape code, which the fast model path calls for vanilla's exact lighting
+accessible class net/minecraft/client/render/block/BlockModelRenderer$AmbientOcclusionFace
+accessible field net/minecraft/client/render/block/BlockModelRenderer$AmbientOcclusionFace brightness [F
+accessible field net/minecraft/client/render/block/BlockModelRenderer$AmbientOcclusionFace lightMap [I
+accessible method net/minecraft/client/render/block/BlockModelRenderer computeFaceShape (Lnet/minecraft/block/Block;[ILnet/minecraft/util/math/Direction;[FLjava/util/BitSet;)V

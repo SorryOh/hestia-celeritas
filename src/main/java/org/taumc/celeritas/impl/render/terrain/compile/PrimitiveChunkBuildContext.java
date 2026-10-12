@@ -2,10 +2,13 @@ package org.taumc.celeritas.impl.render.terrain.compile;
 
 // Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. The vertex data is read through one int view per
 // buffer instead of a new view per block; light values get vanilla's half-texel lightmap offset; no sprite
-// transparency tracker (pre-1.5 only); each builder thread keeps one WorldSlice.
+// transparency tracker (pre-1.5 only); each builder thread keeps one WorldSlice and one BlockModelPipeline.
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.render.block.BlockRenderDispatcher;
 import net.minecraft.client.render.vertex.BufferBuilder;
 import net.minecraft.world.World;
+import org.taumc.celeritas.impl.render.terrain.compile.pipeline.BlockModelPipeline;
 import org.taumc.celeritas.impl.world.WorldSlice;
 import org.embeddedt.embeddium.impl.model.quad.properties.ModelQuadFacing;
 import org.embeddedt.embeddium.impl.render.chunk.RenderPassConfiguration;
@@ -26,6 +29,9 @@ public class PrimitiveChunkBuildContext extends ChunkBuildContext {
     /** The world as this thread's current rebuild sees it, refilled for each task. */
     public final WorldSlice slice;
 
+    /** Writes block models straight into this context's buffers; the tessellator remains for fluids. */
+    public final BlockModelPipeline models;
+
     private ByteBuffer rawDataSource;
     private IntBuffer rawData;
 
@@ -34,6 +40,8 @@ public class PrimitiveChunkBuildContext extends ChunkBuildContext {
         this.world = world;
         this.tesselator = new BufferBuilder(8192);
         this.slice = new WorldSlice(world);
+        BlockRenderDispatcher dispatcher = Minecraft.getInstance().getBlockRenderDispatcher();
+        this.models = new BlockModelPipeline(dispatcher.getModelRenderer(), dispatcher.getModelShaper());
     }
 
     private final ChunkVertexEncoder.Vertex[] vertices = ChunkVertexEncoder.Vertex.uninitializedQuad();
