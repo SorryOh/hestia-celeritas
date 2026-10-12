@@ -13,6 +13,8 @@
     "core.FrustumCullerMixin",
     "core.MultiplayerChunkCacheMixin",
     "core.RenderChunkStorageMixin",
+    "core.ShaderLoaderMixin",
+    "core.TextureAtlasMixin",
     "core.TextureAtlasSpriteMixin",
     "core.TypeInstanceMultimapMixin",
     "core.VanillaChunkBuilderMixin",

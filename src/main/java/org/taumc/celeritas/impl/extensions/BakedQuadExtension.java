@@ -15,4 +15,11 @@ public interface BakedQuadExtension {
     boolean celeritas$isSpriteTrusted();
 
     void celeritas$setSprite(TextureAtlasSprite sprite, boolean trusted);
+
+    /**
+     * The quad's sprite if it is animated, else null. Quads made elsewhere than FaceBakery are looked up once by their
+     * texture coordinates among the block atlas's animated sprites ({@link org.taumc.celeritas.impl.texture.AnimatedSprites}).
+     */
+    @Nullable
+    TextureAtlasSprite celeritas$getAnimatedSprite();
 }

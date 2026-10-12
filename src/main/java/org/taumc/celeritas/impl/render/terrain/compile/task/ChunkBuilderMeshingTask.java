@@ -9,13 +9,17 @@ package org.taumc.celeritas.impl.render.terrain.compile.task;
 // - Block models go straight into Celeritas's buffers (BlockModelPipeline); only fluids still go through vanilla's
 //   renderer and a BufferBuilder that is copied afterwards, as upstream's 1.8.9 branch drew every block.
 // - Visibility comes from vanilla 1.8.9's own ChunkOcclusionGraph instead of upstream's copy of Minecraft 1.16's.
+// - The section lists the animated sprites it uses (block models' quads, fluids' still and flowing sprites), which the
+//   visible sections report every frame (VisibleSectionSpriteTicker); upstream's 1.8.9 branch listed none.
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BlockEntity;
+import net.minecraft.block.material.Material;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.render.block.entity.BlockEntityRenderDispatcher;
 import net.minecraft.client.render.block.entity.BlockEntityRenderer;
+import net.minecraft.client.render.texture.TextureAtlasSprite;
 import net.minecraft.client.render.vertex.DefaultVertexFormat;
 import net.minecraft.client.render.world.ChunkOcclusionGraph;
 import net.minecraft.client.render.world.OcclusionData;
@@ -38,6 +42,8 @@ import org.lwjgl.opengl.GL11C;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.world.WorldSlice;
 import org.taumc.celeritas.impl.world.cloned.ChunkRenderContext;
+
+import java.util.Collection;
 
 public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> {
     private final RenderSection render;
@@ -90,7 +96,7 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         var blockEntityRenderers = BlockEntityRenderDispatcher.INSTANCE;
 
         tesselator.offset(-minX, -minY, -minZ);
-        models.begin(buffers, minX, minY, minZ);
+        models.begin(buffers, renderData.animatedSprites, minX, minY, minZ);
 
         try {
             for (int y = minY; y < maxY; y++) {
@@ -133,6 +139,9 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
                                 tesselator.end();
                                 buildContext.copyRawBuffer(buildContext.rawVertexData(), tesselator.getVertexCount(), buffers, material);
                                 tesselator.clear();
+                                // LiquidRenderer draws with its still and flowing sprites of the fluid's kind.
+                                addAnimated(renderData.animatedSprites, block.getMaterial() == Material.LAVA
+                                        ? renderBlocks.liquidRenderer.lavaSprites : renderBlocks.liquidRenderer.waterSprites);
                             }
                             default -> {
                             }
@@ -157,6 +166,17 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
         encodeVisibilityData(occluder, renderData);
 
         return new ChunkBuildOutput(this.render, renderData, meshes, this.buildTime);
+    }
+
+    private static void addAnimated(Collection<Object> animatedSprites, TextureAtlasSprite[] sprites) {
+        if (sprites == null) {
+            return;
+        }
+        for (TextureAtlasSprite sprite : sprites) {
+            if (sprite != null && sprite.isAnimated()) {
+                animatedSprites.add(sprite);
+            }
+        }
     }
 
     private static final Direction[] FACINGS = new Direction[GraphDirection.COUNT];

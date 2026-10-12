@@ -29,6 +29,7 @@ import org.taumc.celeritas.impl.extensions.BakedQuadExtension;
 import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderPassConfigurationBuilder;
 
 import java.util.BitSet;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -57,6 +58,8 @@ public class BlockModelPipeline {
     private final BlockPos.Mutable neighborPos = new BlockPos.Mutable();
 
     private ChunkBuildBuffers buffers;
+    // The section's animated sprites, for visible-only texture animation (VisibleSprites).
+    private Collection<Object> animatedSprites;
     // The section's lowest corner, negated, as the BufferBuilder offset vanilla's chunk compile sets.
     private double offsetX, offsetY, offsetZ;
 
@@ -71,9 +74,13 @@ public class BlockModelPipeline {
         this.ambientOcclusion = vanilla.new AmbientOcclusionFace();
     }
 
-    /** Starts a section: its quads go into these buffers, positioned relative to its lowest corner. */
-    public void begin(ChunkBuildBuffers buffers, int originX, int originY, int originZ) {
+    /**
+     * Starts a section: its quads go into these buffers, positioned relative to its lowest corner, and the animated
+     * sprites they use into {@code animatedSprites}.
+     */
+    public void begin(ChunkBuildBuffers buffers, Collection<Object> animatedSprites, int originX, int originY, int originZ) {
         this.buffers = buffers;
+        this.animatedSprites = animatedSprites;
         this.offsetX = -originX;
         this.offsetY = -originY;
         this.offsetZ = -originZ;
@@ -285,7 +292,14 @@ public class BlockModelPipeline {
         this.buffers.get(material).getVertexBuffer(facing).push(quad, material);
     }
 
-    private static Material pick(BakedQuad quad, Material material, Material opaqueMaterial) {
+    // The quad's material, noting its sprite when that is animated.
+    private Material pick(BakedQuad quad, Material material, Material opaqueMaterial) {
+        if (this.animatedSprites != null) {
+            TextureAtlasSprite animated = ((BakedQuadExtension) quad).celeritas$getAnimatedSprite();
+            if (animated != null) {
+                this.animatedSprites.add(animated);
+            }
+        }
         return opaqueMaterial != null && isOpaque(quad) ? opaqueMaterial : material;
     }
 

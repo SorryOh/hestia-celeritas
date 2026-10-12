@@ -5,6 +5,8 @@ package org.taumc.celeritas.impl.render.terrain;
 // camera block lookup reuses one BlockPos. No sky-light section list (pre-1.8 only). The constructor call names the
 // shadow pass (none) instead of using the deprecated overload that does the same. Rebuild tasks get copies of the
 // sections around theirs (WorldSlice.prepare, cached as in Celeritas's 1.12.2 version), and F3 shows the build rate.
+// The builder thread count and the fogged-chunk option come from CeleritasSettings; visible sections report their
+// animated sprites (VisibleSectionSpriteTicker), as Celeritas's 1.12.2 version marks them for its animation filter.
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -19,12 +21,14 @@ import org.embeddedt.embeddium.impl.render.chunk.RenderSectionManager;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.tasks.ChunkBuilderTask;
 import org.embeddedt.embeddium.impl.render.chunk.fog.FogService;
+import org.embeddedt.embeddium.impl.render.chunk.lists.SectionTicker;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderInterface;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderTextureSlot;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexType;
 import org.embeddedt.embeddium.impl.render.viewport.Viewport;
 import org.jetbrains.annotations.Nullable;
+import org.taumc.celeritas.api.CeleritasSettings;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.render.terrain.compile.task.ChunkBuilderMeshingTask;
 import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
@@ -42,19 +46,29 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
     // How long taking a rebuild's section copies takes on the render thread, averaged.
     private double prepareNanos;
 
-    public PrimitiveRenderSectionManager(RenderPassConfiguration<?> configuration, World world, int renderDistance, CommandList commandList, int minSection, int maxSection, int requestedThreads) {
+    private final boolean drawFoggedChunks;
+
+    public PrimitiveRenderSectionManager(RenderPassConfiguration<?> configuration, World world, int renderDistance, CommandList commandList, int minSection, int maxSection, int requestedThreads, boolean drawFoggedChunks) {
         super(configuration, () -> new PrimitiveChunkBuildContext(world, configuration), ChunkRenderer::new, renderDistance, commandList, minSection, maxSection, requestedThreads, false);
         this.world = world;
         this.sectionCache = new ClonedChunkSectionCache(world);
+        this.drawFoggedChunks = drawFoggedChunks;
     }
 
     public static PrimitiveRenderSectionManager create(ChunkVertexType vertexType, World world, int renderDistance, CommandList commandList) {
-        // TODO support thread option
-        int idealThreadCount = 0;
         int maxSection = world.getHeight() / 16;
-        return new PrimitiveRenderSectionManager(PrimitiveRenderPassConfigurationBuilder.build(vertexType), world, renderDistance, commandList,
+        boolean drawFoggedChunks = CeleritasSettings.drawFoggedChunks;
+        // The section search is a circle; vanilla draws the whole square of loaded chunks, whose corners lie up to
+        // sqrt(2) times as far. Only the search uses this distance: sections exist only for loaded chunks.
+        int searchDistance = drawFoggedChunks ? (int) Math.ceil(renderDistance * Math.sqrt(2.0)) : renderDistance;
+        return new PrimitiveRenderSectionManager(PrimitiveRenderPassConfigurationBuilder.build(vertexType), world, searchDistance, commandList,
                 0, maxSection,
-                idealThreadCount);
+                Math.max(0, CeleritasSettings.builderThreads), drawFoggedChunks);
+    }
+
+    @Override
+    protected @Nullable SectionTicker createSectionTicker() {
+        return new VisibleSectionSpriteTicker();
     }
 
     @Override
@@ -79,7 +93,7 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
 
     @Override
     protected boolean useFogOcclusion() {
-        return true;
+        return !this.drawFoggedChunks;
     }
 
     @Override

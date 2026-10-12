@@ -20,6 +20,11 @@ accessible field net/minecraft/client/render/GameRenderer fogBlue F
 # BiomeColors' grass, foliage and water colour providers, which the chunk builds' colour cache tells apart
 accessible class net/minecraft/client/world/color/BiomeColors$ColorProvider
 
+# The fluid renderer's water and lava sprites, which sections with fluids list as their animated sprites
+accessible field net/minecraft/client/render/block/BlockRenderDispatcher liquidRenderer Lnet/minecraft/client/render/block/LiquidRenderer;
+accessible field net/minecraft/client/render/block/LiquidRenderer lavaSprites [Lnet/minecraft/client/render/texture/TextureAtlasSprite;
+accessible field net/minecraft/client/render/block/LiquidRenderer waterSprites [Lnet/minecraft/client/render/texture/TextureAtlasSprite;
+
 # Vanilla's ambient occlusion and face shape code, which the fast model path calls for vanilla's exact lighting
 accessible class net/minecraft/client/render/block/BlockModelRenderer$AmbientOcclusionFace
 accessible field net/minecraft/client/render/block/BlockModelRenderer$AmbientOcclusionFace brightness [F

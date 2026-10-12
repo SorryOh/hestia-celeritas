@@ -43,7 +43,8 @@ every change. In short (2026-10-12):
 - **celeritas-common and JOML are nested**, not shaded into the jar, so either can be swapped.
 - **No glGet per frame:** fog values come from GlStateManager's cached state and GameRenderer's fog colour (as in
   Celeritas's 1.12.2 version), and the matrices from the copy vanilla's Camera reads once per frame. Upstream asked the
-  driver with seven glGet calls per terrain pass; each one waits for the driver.
+  driver with seven glGet calls per terrain pass; each one waits for the driver. (Vanilla's own camera and frustum
+  setup makes seven more per frame, for the matrices and the viewport; Hestia answers those from CPU copies.)
 - **Frustum:** the background visibility search gets its own copy of vanilla's frustum planes, which vanilla rewrites at
   the start of every frame while that search may still run; and boxes are moved back from the eye to the camera
   entity's feet, where vanilla's planes are anchored (upstream was off by the eye height, about 1.6 blocks).
@@ -97,8 +98,28 @@ every change. In short (2026-10-12):
   faces; its tinted side overlay stays in the cutout pass and still draws over them. As in Celeritas's quad analyzer, a
   face's quads only move when no opaque quad comes after a see-through one. The render pass configuration's default
   solid material is now the solid one (upstream passed cutout_mipped).
+- **Fog like vanilla's:** celeritas-common's fog include eases the fog in with `smoothstep(start, end, distance)`, where
+  1.8.9's fixed-function GL_LINEAR fog rises in a straight line (a quarter of the way in, vanilla is 25% fogged,
+  smoothstep 16%). `ShaderLoaderMixin` changes that expression in the shader source as it is loaded; the nested jar
+  stays as it is. `-Dceleritas.upstreamFog=true` keeps celeritas-common's curve. The fog's shape already matched:
+  vanilla switches NVIDIA cards to radial fog, and Celeritas measures the distance spherically.
+- **Settings for other mods** (`org.taumc.celeritas.api.CeleritasSettings`, used by Hestia's settings screen): the
+  chunk builder thread count (0 is celeritas-common's own choice), and whether fully fogged chunks are drawn. Celeritas
+  searches a circle of the render distance and skips sections behind the fog, so the corners of the square of loaded
+  chunks, which vanilla draws as fog-coloured shapes against the sky, are left out; with the option on, the search
+  reaches the corners (the render distance times the square root of 2) and fog occlusion is off. Both apply when the
+  world renderer is made again (F3+A).
+- **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
+  `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
+  no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
+  render region (8 x 4 x 8 sections) that has one visible section with sprites, and builds a new set after every
+  search; `VisibleSectionSpriteTicker` marks only the visible sections' sprites and allocates only when that set
+  changes. Block models note their quads' animated sprites while a section builds, and fluids their still and flowing
+  sprites. A quad that didn't come from FaceBakery (vanilla bakes every block quad there; other mods may not) is looked
+  up once by its texture coordinates among the block atlas's animated sprites (`AnimatedSprites`, `TextureAtlasMixin`).
 - **F3** shows the chunk build rate and average build time, the number of section copies and the main thread's time per
-  rebuild task for taking them.
+  rebuild task for taking them. The left column's `C:` line ends with the number of visible animated sprites
+  (celeritas-common's place for the sprite ticker's line).
 - **Empty chunk sections** get no rebuild tasks (as in Celeritas's 1.12.2 version).
 - **Fewer per-frame allocations:** reused matrices, fog colour array, frustum copies, entity BlockPos and block entity
   context; indexed loops instead of iterators. A few remain in celeritas-common's own API (the viewport, camera state
