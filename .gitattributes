@@ -1,6 +1,10 @@
 #
 # https://help.github.com/articles/dealing-with-line-endings/
 #
+# Text files are checked out with LF on every system (Hestia build): the jar holds some of them (COPYING, resources), so
+# it comes out byte for byte the same whatever git's line-ending settings are, and Hestia can check its hash.
+*               text=auto eol=lf
+
 # Linux start script should use lf
 /gradlew        text eol=lf
 
