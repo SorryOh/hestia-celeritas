@@ -1,0 +1,25 @@
+pluginManagement {
+	repositories {
+		maven {
+			name = "Fabric"
+			url = "https://maven.fabricmc.net/"
+		}
+		maven {
+			name = "Ornithe Releases"
+			url = "https://maven.ornithemc.net/releases"
+		}
+		maven {
+			name = "Ornithe Snapshots"
+			url = "https://maven.ornithemc.net/snapshots"
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+}
+
+plugins {
+	// Lets Gradle download the JDK 25 toolchain when none is installed.
+	id "org.gradle.toolchains.foojay-resolver-convention" version "1.0.0"
+}
+
+rootProject.name = "celeritas-hestia"

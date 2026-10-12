@@ -1,7 +1,6 @@
 package org.taumc.celeritas.mixin.core;
 
-//? if >=1.8 {
-/*import net.minecraft.client.gui.overlay.DebugOverlay;
+import net.minecraft.client.gui.overlay.DebugOverlay;
 import net.minecraft.text.Formatting;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -11,6 +10,7 @@ import org.taumc.celeritas.impl.debug.CeleritasDebugStrings;
 
 import java.util.List;
 
+/** Adds Celeritas's renderer lines to the right side of the F3 screen. */
 @Mixin(DebugOverlay.class)
 public class DebugOverlayMixin {
     @Inject(method = "getSystemInfo", at = @At("RETURN"))
@@ -27,4 +27,3 @@ public class DebugOverlayMixin {
         }).toList());
     }
 }
-*///?}

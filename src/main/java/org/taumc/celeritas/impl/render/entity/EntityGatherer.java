@@ -1,7 +1,8 @@
 package org.taumc.celeritas.impl.render.entity;
 
-//? if >=1.8 {
-/*
+// Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names; indexed loop over the chunk list (no iterator
+// per frame).
+
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.TypeInstanceMultiMap;
@@ -31,9 +32,10 @@ public class EntityGatherer {
         // Iterate directly over chunk entity lists where possible - mods may create multipart entities that are not
         // added to the main loadedEntityList.
         if (world.getChunkSource() instanceof ClientChunkCacheAccessor provider) {
-            var loadedChunks = provider.getAllChunks();
-            for (WorldChunk chunk : loadedChunks) {
-                if (!((WorldChunkAccessor)chunk).getHasEntities()) {
+            List<WorldChunk> loadedChunks = provider.getAllChunks();
+            for (int i = 0, n = loadedChunks.size(); i < n; i++) {
+                WorldChunk chunk = loadedChunks.get(i);
+                if (!((WorldChunkAccessor) chunk).getHasEntities()) {
                     continue;
                 }
                 TypeInstanceMultiMap<Entity>[] entityMaps = chunk.getEntities();
@@ -48,5 +50,3 @@ public class EntityGatherer {
         return this.entityList;
     }
 }
-
-*///?}

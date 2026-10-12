@@ -1,67 +1,71 @@
 package org.taumc.celeritas.mixin.core;
 
+// Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. setupRender uses the spectator flag vanilla passes;
+// markDirty keeps vanilla's private access and ignores updates before a world is loaded; the entity loop reuses its
+// BlockPos and reads the camera entity once per frame instead of once per entity.
+
 import com.llamalad7.mixinextras.sugar.Local;
-import com.mojang.blaze3d.platform.Lighting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.render.Culler;
+import net.minecraft.client.render.block.BlockLayer;
 import net.minecraft.client.render.entity.EntityRenderDispatcher;
+import net.minecraft.client.render.platform.Lighting;
 import net.minecraft.client.render.world.WorldRenderer;
+import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.living.LivingEntity;
-//? if >=1.8 {
-/*import net.minecraft.client.world.ClientWorld;
-import net.minecraft.client.render.block.BlockLayer;
 import net.minecraft.entity.projectile.WitherSkullEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
-import org.taumc.celeritas.impl.render.entity.EntityGatherer;
-*///?}
-import net.minecraft.world.World;
 import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
 import org.embeddedt.embeddium.impl.render.viewport.ViewportProvider;
-import org.objectweb.asm.Opcodes;
-import org.spongepowered.asm.mixin.*;
+import org.spongepowered.asm.mixin.Final;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.taumc.celeritas.impl.extensions.RenderGlobalExtension;
+import org.taumc.celeritas.impl.render.entity.EntityGatherer;
 import org.taumc.celeritas.impl.render.terrain.CeleritasWorldRenderer;
-//? if <1.0.0-beta.8
-//import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveBuiltRenderSectionData;
 
+import java.util.List;
+
+/**
+ * Hands vanilla's terrain rendering to Celeritas: terrain setup, the layer draws, chunk updates and dirty marking are
+ * replaced; block entities and entities are drawn from Celeritas's sections and the client's chunk lists, since
+ * vanilla's own visible-chunk list stays empty.
+ */
 @Mixin(value = WorldRenderer.class, priority = 900)
 public abstract class WorldRendererMixin implements RenderGlobalExtension {
 
     @Shadow
+    @Final
     private Minecraft minecraft;
 
-    //? if <1.8 {
     @Shadow
-    private int chunkGridSizeX, chunkGridSizeY, chunkGridSizeZ;
-    //?}
-
-    //? if >=1.8 {
-    /*@Shadow
-    private int viewDistance;
+    private int lastViewDistance;
 
     @Shadow
     public abstract void reload();
 
     @Shadow
     private ClientWorld world;
+
     @Shadow
     @Final
     private EntityRenderDispatcher entityRenderDispatcher;
 
     @Shadow
-    private int globalEntityCount;
-    *///?}
+    private int renderedEntityCount;
 
+    @Unique
     private CeleritasWorldRenderer renderer;
 
     @Inject(method = "<init>", at = @At("RETURN"))
-    private void init(CallbackInfo ci) {
+    private void init(Minecraft minecraft, CallbackInfo ci) {
         this.renderer = new CeleritasWorldRenderer();
     }
 
@@ -71,7 +75,7 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
     }
 
     @Inject(method = "setWorld", at = @At("RETURN"))
-    private void onWorldChanged(@Coerce World world, CallbackInfo ci) {
+    private void onWorldChanged(ClientWorld world, CallbackInfo ci) {
         RenderDevice.enterManagedCode();
 
         try {
@@ -81,40 +85,22 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
         }
     }
 
-
-    //? if <1.8 {
-    @Inject(method = { "reload", "m_6748042" }, at = @At(opcode = Opcodes.PUTFIELD, value = "FIELD", target = "Lnet/minecraft/client/render/world/WorldRenderer;chunkGridSizeZ:I", shift = At.Shift.AFTER))
-    private void nullifyBuiltChunkStorage(CallbackInfo ci) {
-        this.chunkGridSizeX = 0;
-        this.chunkGridSizeY = 0;
-        this.chunkGridSizeZ = 0;
-    }
-    //?}
-
     /**
      * @reason Redirect the chunk layer render passes to our renderer
      * @author JellySquid
      */
     @Overwrite
-    //? if <1.8 {
-    public int render(LivingEntity viewEntity, int layer, double ticks) {
-    //?} else
-    //public int render(BlockLayer layer, double ticks, int anaglyphRenderPass, Entity viewEntity) {
-        @SuppressWarnings("unused")
-        // Allow FalseTweaks mixin to replace constant
-        double magicSortingConstantValue = 1.0D;
+    public int render(BlockLayer layer, double ticks, int anaglyphRenderPass, Entity viewEntity) {
         RenderDevice.enterManagedCode();
 
         Lighting.turnOff();
 
-        double d3 = viewEntity.prevTickX + (viewEntity.x - viewEntity.prevTickX) * ticks;
+        double d3 = viewEntity.prevX + (viewEntity.x - viewEntity.prevX) * ticks;
         // Do not apply eye height here or weird offsets will happen
-        double d4 = viewEntity.prevTickY + (viewEntity.y - viewEntity.prevTickY) * ticks;
-        double d5 = viewEntity.prevTickZ + (viewEntity.z - viewEntity.prevTickZ) * ticks;
+        double d4 = viewEntity.prevY + (viewEntity.y - viewEntity.prevY) * ticks;
+        double d5 = viewEntity.prevZ + (viewEntity.z - viewEntity.prevZ) * ticks;
 
-        //? if >=1.0.0-beta.8 {
-        this.minecraft.gameRenderer.enableLightMap(/*? if <1.8 {*/ticks/*?}*/);
-        //?}
+        this.minecraft.gameRenderer.enableLightMap();
 
         try {
             this.renderer.drawChunkLayer(layer, d3, d4, d5);
@@ -122,9 +108,7 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
             RenderDevice.exitManagedCode();
         }
 
-        //? if >=1.0.0-beta.8 {
-        this.minecraft.gameRenderer.disableLightMap(/*? if <1.8 {*/ticks/*?}*/);
-        //?}
+        this.minecraft.gameRenderer.disableLightMap();
 
         return 1;
     }
@@ -137,22 +121,17 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
      * @author JellySquid
      */
     @Overwrite
-    //? if >=1.8 {
-    /*public void setupRender(Entity camera, double tickDelta, Culler culler, int frame, boolean loadChunks) {
-        if (this.minecraft.options.viewDistance != this.viewDistance) {
+    public void setupRender(Entity camera, double tickDelta, Culler culler, int frame, boolean spectator) {
+        if (this.minecraft.options.viewDistance != this.lastViewDistance) {
             this.reload();
         }
 
-        updateFrustums(culler, (float)tickDelta);
-    }
-    *///?}
-    public void updateFrustums(Culler camera, float tick) {
         RenderDevice.enterManagedCode();
 
         try {
-            this.renderer.setupTerrain(((ViewportProvider)camera).sodium$createViewport(),
-                    CeleritasWorldRenderer.captureCameraState(tick),
-                    this.frame++, this.minecraft.player.noClip, false);
+            this.renderer.setupTerrain(((ViewportProvider) culler).sodium$createViewport(),
+                    CeleritasWorldRenderer.captureCameraState(tickDelta),
+                    this.frame++, spectator, false);
         } finally {
             RenderDevice.exitManagedCode();
         }
@@ -163,16 +142,13 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
      * @author JellySquid
      */
     @Overwrite
-    public void markDirty(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
-        this.renderer.scheduleRebuildForBlockArea(minX, minY, minZ, maxX, maxY, maxZ, false);
+    private void markDirty(int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
+        if (this.renderer.getRenderSectionManager() != null) {
+            this.renderer.scheduleRebuildForBlockArea(minX, minY, minZ, maxX, maxY, maxZ, false);
+        }
     }
 
-    //? if <1.3 {
-    private static final String ON_RELOAD = "m_6748042";
-    //?} else
-    //private static final String ON_RELOAD = "reload()V";
-
-    @Inject(method = ON_RELOAD, at = @At("RETURN"))
+    @Inject(method = "reload()V", at = @At("RETURN"))
     private void onReload(CallbackInfo ci) {
         RenderDevice.enterManagedCode();
 
@@ -183,38 +159,38 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
         }
     }
 
+    /**
+     * @reason Celeritas builds and uploads chunks during terrain setup
+     * @author JellySquid
+     */
     @Overwrite
-    //? if <1.8 {
-    public boolean compileChunks(LivingEntity camera, boolean force) {
-        return true;
-    }
-    //?} else {
-    /*public void compileChunksUntil(long time) {
+    public void compileChunksUntil(long time) {
 
     }
-    *///?}
 
-    @Inject(method = "renderEntities", at = @At(value = "FIELD", target = "Lnet/minecraft/client/render/world/WorldRenderer;globalBlockEntities:"
-            //? if >=1.8 {
-            //+ "Ljava/util/Set;"
-            //?} else
-            + "Ljava/util/List;"
-            , ordinal = 0))
-    public void sodium$renderTileEntities(CallbackInfo ci, @Local(ordinal = 0, argsOnly = true) float partialTicks) {
+    @Inject(method = "renderEntities", at = @At(value = "FIELD", target = "Lnet/minecraft/client/render/world/WorldRenderer;globalBlockEntities:Ljava/util/Set;", ordinal = 0))
+    private void sodium$renderTileEntities(Entity camera, Culler culler, float partialTicks, CallbackInfo ci) {
         this.renderer.renderBlockEntities(partialTicks);
     }
 
-    //? if >=1.8 {
-    /*private final EntityGatherer celeritas$entityGatherer = new EntityGatherer();
+    @Unique
+    private final EntityGatherer celeritas$entityGatherer = new EntityGatherer();
+
+    @Unique
+    private final BlockPos.Mutable celeritas$entityBlockPos = new BlockPos.Mutable();
 
     @Inject(method = "renderEntities", at = @At(value = "INVOKE_STRING", target = "Lnet/minecraft/util/profiler/Profiler;swap(Ljava/lang/String;)V", args = "ldc=entities"))
     private void celeritas$renderEntities(Entity camera, Culler culler, float tickDelta, CallbackInfo ci, @Local(ordinal = 0) double d, @Local(ordinal = 1) double e, @Local(ordinal = 2) double g) {
         celeritas$entityGatherer.clear();
-        var entityList = celeritas$entityGatherer.getLoadedEntityList(this.world);
+        List<Entity> entityList = celeritas$entityGatherer.getLoadedEntityList(this.world);
 
-        BlockPos.Mutable entityBlockPos = new BlockPos.Mutable();
+        BlockPos.Mutable entityBlockPos = this.celeritas$entityBlockPos;
+        Entity cameraEntity = this.minecraft.getCamera();
+        boolean isSelfSleeping = cameraEntity instanceof LivingEntity living && living.isSleeping();
 
-        for (Entity entity : entityList) {
+        for (int i = 0, n = entityList.size(); i < n; i++) {
+            Entity entity = entityList.get(i);
+
             if (!this.entityRenderDispatcher.shouldRender(entity, culler, d, e, g) && entity.rider != this.minecraft.player) {
                 if (entity instanceof WitherSkullEntity) {
                     this.minecraft.getEntityRenderDispatcher().renderNameTag(entity, tickDelta);
@@ -222,8 +198,7 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
                 continue;
             }
 
-            boolean isSelfSleeping = this.minecraft.getCamera() instanceof LivingEntity ? ((LivingEntity)this.minecraft.getCamera()).isSleeping() : false;
-            if (entity == this.minecraft.getCamera() && this.minecraft.options.perspective == 0 && !isSelfSleeping) {
+            if (entity == cameraEntity && this.minecraft.options.perspective == 0 && !isSelfSleeping) {
                 continue;
             }
 
@@ -234,11 +209,10 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
                 }
             }
 
-            this.globalEntityCount++;
-            this.entityRenderDispatcher.renderSecondPass(entity, tickDelta);
+            this.renderedEntityCount++;
+            this.entityRenderDispatcher.render(entity, tickDelta);
         }
     }
-    *///?}
 
     /**
      * @reason Replace the debug string
@@ -248,18 +222,4 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
     public String getChunkDebugInfo() {
         return this.renderer.getChunksDebugString();
     }
-
-    //? if <1.0.0-beta.8.1 {
-    /*/^*
-     * @author embeddedt
-     * @reason trigger chunk updates when sky light level changes
-     ^/
-    @Overwrite
-    public void onAmbientDarknessChanged() {
-        for (var section : this.renderer.getRenderSectionManager().getSectionsWithSkyLight()) {
-            this.renderer.scheduleRebuildForChunk(section.getChunkX(), section.getChunkY(), section.getChunkZ(), false);
-        }
-    }
-    *///?}
 }
-

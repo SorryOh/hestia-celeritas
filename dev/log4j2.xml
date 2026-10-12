@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Log4j configuration for `gradlew runClient` only (not shipped in the jar).
+  Minecraft 1.8.9 bundles log4j 2.0-beta9, which cannot parse the config Loom generates, so the
+  dev client logged nothing. This mirrors vanilla's own layout: console plus logs/latest.log.
+-->
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="SysOut" target="SYSTEM_OUT">
+            <PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level] [%logger{1}]: %msg%n"/>
+        </Console>
+        <RollingRandomAccessFile name="File" fileName="logs/latest.log" filePattern="logs/%d{yyyy-MM-dd}-%i.log.gz">
+            <PatternLayout pattern="[%d{HH:mm:ss}] [%t/%level] [%logger{1}]: %msg%n"/>
+            <Policies>
+                <TimeBasedTriggeringPolicy/>
+                <OnStartupTriggeringPolicy/>
+            </Policies>
+        </RollingRandomAccessFile>
+    </Appenders>
+    <Loggers>
+        <Root level="info">
+            <AppenderRef ref="SysOut"/>
+            <AppenderRef ref="File"/>
+        </Root>
+    </Loggers>
+</Configuration>

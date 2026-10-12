@@ -1,0 +1,18 @@
+accessWidener v2 named
+
+# GlStateManager's cached fog and alpha-test state, read instead of asking the driver with glGet (Hestia build)
+accessible class net/minecraft/client/render/platform/GlStateManager$Fog
+accessible class net/minecraft/client/render/platform/GlStateManager$Alpha
+accessible class net/minecraft/client/render/platform/GlStateManager$GlState
+accessible field net/minecraft/client/render/platform/GlStateManager FOG Lnet/minecraft/client/render/platform/GlStateManager$Fog;
+accessible field net/minecraft/client/render/platform/GlStateManager ALPHA_TEST Lnet/minecraft/client/render/platform/GlStateManager$Alpha;
+accessible field net/minecraft/client/render/platform/GlStateManager$GlState enabled Z
+
+# The camera matrices vanilla already reads back once per frame (Camera.update)
+accessible field net/minecraft/client/render/Camera MODELVIEW_MATRIX_BUFFER Ljava/nio/FloatBuffer;
+accessible field net/minecraft/client/render/Camera PROJECTION_MATRIX_BUFFER Ljava/nio/FloatBuffer;
+
+# The fog colour GameRenderer works out each frame
+accessible field net/minecraft/client/render/GameRenderer fogRed F
+accessible field net/minecraft/client/render/GameRenderer fogGreen F
+accessible field net/minecraft/client/render/GameRenderer fogBlue F

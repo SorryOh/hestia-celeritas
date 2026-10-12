@@ -13,19 +13,14 @@ import java.util.List;
 public class CeleritasDebugStrings {
     public static List<Pair<String, Integer>> getStringsToRender() {
         List<Pair<String, Integer>> stringsToRender = new ArrayList<>();
-
         stringsToRender.add(Pair.of(getNativeMemoryString(), -1));
         stringsToRender.add(Pair.of("", -1));
-
         stringsToRender.add(Pair.of("%s Renderer (%s)".formatted("Celeritas", Celeritas.VERSION), 0xFF55FF55));
         stringsToRender.add(Pair.of("", -1));
-
         var renderer = CeleritasWorldRenderer.instanceNullable();
-
         if (renderer != null) {
             renderer.getDebugStrings().forEach(str -> stringsToRender.add(Pair.of(str, -1)));
         }
-
         return stringsToRender;
     }
 

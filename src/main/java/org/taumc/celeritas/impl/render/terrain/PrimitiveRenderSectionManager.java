@@ -1,17 +1,23 @@
 package org.taumc.celeritas.impl.render.terrain;
 
-import it.unimi.dsi.fastutil.objects.ReferenceOpenHashSet;
-import net.minecraft.block.Block;
+// Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. Empty chunk sections count as visually empty (as
+// in Celeritas's 1.12.2 version), so they get no rebuild tasks; upstream's 1.8.9 branch only skipped empty chunks. The
+// camera block lookup reuses one BlockPos. No sky-light section list (pre-1.8 only). The constructor call names the
+// shadow pass (none) instead of using the deprecated overload that does the same.
+
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
+import net.minecraft.world.chunk.WorldChunkSection;
 import org.embeddedt.embeddium.impl.gl.device.CommandList;
 import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
-import org.embeddedt.embeddium.impl.render.chunk.*;
+import org.embeddedt.embeddium.impl.render.chunk.DefaultChunkRenderer;
+import org.embeddedt.embeddium.impl.render.chunk.RenderPassConfiguration;
+import org.embeddedt.embeddium.impl.render.chunk.RenderSection;
+import org.embeddedt.embeddium.impl.render.chunk.RenderSectionManager;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.tasks.ChunkBuilderTask;
 import org.embeddedt.embeddium.impl.render.chunk.fog.FogService;
-import org.embeddedt.embeddium.impl.render.chunk.data.BuiltRenderSectionData;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderInterface;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderTextureSlot;
@@ -19,32 +25,23 @@ import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexType;
 import org.embeddedt.embeddium.impl.render.viewport.Viewport;
 import org.embeddedt.embeddium.impl.util.position.SectionPos;
 import org.jetbrains.annotations.Nullable;
-import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
-import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveBuiltRenderSectionData;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.render.terrain.compile.task.ChunkBuilderMeshingTask;
+import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
 import org.taumc.celeritas.impl.world.cloned.ChunkRenderContext;
-
-import java.util.Collection;
 
 public class PrimitiveRenderSectionManager extends RenderSectionManager {
     private final World world;
-    private final ReferenceOpenHashSet<RenderSection> sectionsWithSkyLight = new ReferenceOpenHashSet<>();
+    private final BlockPos.Mutable cameraBlockPos = new BlockPos.Mutable();
 
     public PrimitiveRenderSectionManager(RenderPassConfiguration<?> configuration, World world, int renderDistance, CommandList commandList, int minSection, int maxSection, int requestedThreads) {
-        super(configuration, () -> new PrimitiveChunkBuildContext(world, configuration), ChunkRenderer::new, renderDistance, commandList, minSection, maxSection, requestedThreads);
+        super(configuration, () -> new PrimitiveChunkBuildContext(world, configuration), ChunkRenderer::new, renderDistance, commandList, minSection, maxSection, requestedThreads, false);
         this.world = world;
     }
 
     public static PrimitiveRenderSectionManager create(ChunkVertexType vertexType, World world, int renderDistance, CommandList commandList) {
         // TODO support thread option
-        //? if <1.8 {
-        int idealThreadCount = -1;
-        //?} else
-        //int idealThreadCount = 0;
-        //? if <1.2 {
-        //int maxSection = 8;
-        //?} else
+        int idealThreadCount = 0;
         int maxSection = world.getHeight() / 16;
         return new PrimitiveRenderSectionManager(PrimitiveRenderPassConfigurationBuilder.build(vertexType), world, renderDistance, commandList,
                 0, maxSection,
@@ -78,45 +75,27 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
 
     @Override
     protected boolean shouldUseOcclusionCulling(Viewport positionedViewport, boolean spectator) {
-        final boolean useOcclusionCulling;
         var camBlockPos = positionedViewport.getBlockCoord();
-
-        //? if <1.8 {
-        var block = this.world.getBlock(camBlockPos.x(), camBlockPos.y(), camBlockPos.z());
-        //?} else
-        //var block = this.world.getBlockState(new net.minecraft.util.math.BlockPos(camBlockPos.x(), camBlockPos.y(), camBlockPos.z())).getBlock();
-
-        //? if >=1.7 {
-        //boolean opaque = block.isOpaqueCube();
-        //?} else
-        boolean opaque = Block.IS_OPAQUE[block];
-
-        useOcclusionCulling = !spectator || !opaque;
-
-        return useOcclusionCulling;
+        var block = this.world.getBlockState(this.cameraBlockPos.set(camBlockPos.x(), camBlockPos.y(), camBlockPos.z())).getBlock();
+        return !spectator || !block.isOpaque();
     }
 
     @Override
     protected boolean isSectionVisuallyEmpty(int x, int y, int z) {
-        var chunk = this.world.getChunkAt(x, z);
-        return chunk.isEmpty();
+        WorldChunk chunk = this.world.getChunkAt(x, z);
+        if (chunk.isEmpty()) {
+            return true;
+        }
+        WorldChunkSection[] sections = chunk.getSections();
+        if (y < 0 || y >= sections.length) {
+            return true;
+        }
+        WorldChunkSection section = sections[y];
+        return section == null || section.isEmpty();
     }
 
-    //? if >=1.8 {
-    /*private void populateTileEntities(WorldChunk chunk, int sectionY) {
-        if (chunk.isEmpty()) {
-            return;
-        }
-        var sections = chunk.getSections();
-        if (sectionY < 0 || sectionY > sections.length) {
-            return;
-        }
-
-        var section = sections[sectionY];
-
-        if (section == null || section.isEmpty()) {
-            return;
-        }
+    private void populateTileEntities(WorldChunk chunk, int sectionY) {
+        WorldChunkSection section = chunk.getSections()[sectionY];
 
         int sectionBlockY = sectionY * 16;
         int chunkBlockX = chunk.chunkX * 16;
@@ -133,7 +112,6 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
             }
         }
     }
-    *///?}
 
     @Override
     protected @Nullable ChunkBuilderTask<ChunkBuildOutput> createRebuildTask(RenderSection render, int frame) {
@@ -144,8 +122,7 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
         ChunkRenderContext context = new ChunkRenderContext(new SectionPos(render.getChunkX(), render.getChunkY(), render.getChunkZ()));
 
         // TODO: This is a workaround until we properly snapshot chunk sections as is done in 1.12
-        //? if >=1.8
-        //populateTileEntities(this.world.getChunkAt(render.getChunkX(), render.getChunkZ()), render.getChunkY());
+        populateTileEntities(this.world.getChunkAt(render.getChunkX(), render.getChunkZ()), render.getChunkY());
 
         return new ChunkBuilderMeshingTask(render, context, frame, this.cameraPosition);
     }
@@ -153,25 +130,6 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
     @Override
     protected boolean allowImportantRebuilds() {
         return false;
-    }
-
-    @Override
-    protected boolean updateSectionInfo(RenderSection render, @Nullable BuiltRenderSectionData info) {
-        boolean changed = super.updateSectionInfo(render, info);
-
-        if (changed) {
-            if (!(info instanceof PrimitiveBuiltRenderSectionData data)) {
-                this.sectionsWithSkyLight.remove(render);
-            } else if (data.hasSkyLight) {
-                this.sectionsWithSkyLight.add(render);
-            }
-        }
-
-        return changed;
-    }
-
-    public Collection<RenderSection> getSectionsWithSkyLight() {
-        return this.sectionsWithSkyLight;
     }
 
     private static class ChunkRenderer extends DefaultChunkRenderer {

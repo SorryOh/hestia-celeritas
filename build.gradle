@@ -1,0 +1,133 @@
+plugins {
+	id "net.fabricmc.fabric-loom-remap" version "${loom_version}"
+	id "ploceus" version "${ploceus_version}"
+	id "maven-publish"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+repositories {
+	// Loom and Ploceus add the Minecraft, Fabric and Ornithe repositories themselves.
+
+	// celeritas-common, from upstream's own Maven.
+	exclusiveContent {
+		forRepository {
+			maven {
+				name = "TauMC"
+				url = "https://maven.taumc.org/releases"
+			}
+		}
+		filter { includeGroup "org.embeddedt.celeritas" }
+	}
+	// Pylon, from its author's Maven.
+	maven {
+		name = "CloverClient"
+		url = "https://maven.cloverclient.com/releases"
+		content { includeGroup "pl.tomgirl" }
+	}
+}
+
+configurations {
+	// Pylon provides LWJGL 3; the game's own LWJGL 2 (Legacy Fabric's patched 2.9.4, which Ploceus adds) stays out of
+	// every classpath, as in Hestia's build.
+	configureEach {
+		exclude group: "org.lwjgl.lwjgl"
+	}
+}
+
+loom {
+	// Opens GlStateManager's cached fog and alpha-test state and the camera matrices vanilla already reads each frame.
+	accessWidenerPath = file("src/main/resources/celeritas.accesswidener")
+
+	// 1.8.9's log4j 2.0-beta9 cannot read Loom's generated config; use a compatible one for dev runs.
+	log4jConfigs.setFrom(file("dev/log4j2.xml"))
+
+	runs {
+		client {
+			vmArgs "-Xmx4096M", "-Xms512M", "-XX:+UseG1GC", "-XX:+ParallelRefProcEnabled", "-XX:+UseCompactObjectHeaders"
+			// LWJGL 3 (Pylon) loads native code; Java 25 warns about that (and will block it) without this.
+			vmArgs "--enable-native-access=ALL-UNNAMED"
+			if (System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac")) {
+				vmArgs "-XstartOnFirstThread"
+			}
+		}
+	}
+}
+
+ploceus {
+	// Ornithe's intermediary generation 2, which Hestia, Sarcio and the other Ornithe 1.8.9 mods use: every jar that
+	// runs together must agree. Upstream's 1.8.9 target is still on generation 1 (Feather build 28).
+	setIntermediaryGeneration(2)
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings ploceus.featherMappings(project.feather_build)
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+	// Upstream's renderer core (LGPL-3.0) and JOML (MIT), each nested unmodified with jar-in-jar instead of shaded, so
+	// either can be swapped. celeritas-common's other runtime dependencies come with the game on Ornithe: fastutil,
+	// Gson and log4j from the gen2 library upgrades, ASM from Fabric Loader.
+	implementation("org.embeddedt.celeritas:celeritas-common:${project.celeritas_common_version}") { transitive = false }
+	include("org.embeddedt.celeritas:celeritas-common:${project.celeritas_common_version}") { transitive = false }
+	implementation "org.joml:joml:${project.joml_version}"
+	include "org.joml:joml:${project.joml_version}"
+
+	// LWJGL 3's API (GL11C, GL32C...) to compile against; at runtime Pylon provides it (fabric.mod.json depends on it).
+	modCompileOnly "pl.tomgirl:pylon:${project.pylon_version}"
+	modLocalRuntime "pl.tomgirl:pylon:${project.pylon_version}"
+}
+
+processResources {
+	inputs.property "version", project.version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": inputs.properties.version
+	}
+}
+
+java {
+	// JDK 25 compiles; the bytecode is Java 21, the oldest Java upstream supports for these Minecraft versions.
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(25)
+	}
+	withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.encoding = "UTF-8"
+	it.options.release = 21
+	it.options.compilerArgs << "-Xlint:deprecation"
+}
+
+// The same sources give the same jar, so Hestia's hash check stays stable between rebuilds.
+tasks.withType(AbstractArchiveTask).configureEach {
+	preserveFileTimestamps = false
+	reproducibleFileOrder = true
+}
+
+jar {
+	// The license texts travel with the binary, as upstream's own jars do.
+	from("COPYING", "COPYING.LESSER")
+}
+
+sourcesJar {
+	from("COPYING", "COPYING.LESSER", "README.md")
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) {
+			artifactId = project.archives_base_name
+			from components.java
+		}
+	}
+	repositories {
+		// publishToMavenLocal is what Hestia's build reads.
+	}
+}

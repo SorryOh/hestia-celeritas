@@ -1,55 +1,51 @@
 package org.taumc.celeritas.impl.render.terrain.compile;
 
-import com.mojang.blaze3d.vertex.BufferBuilder;
+// Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. The vertex data is read through one int view per
+// buffer instead of a new view per block; light values get vanilla's half-texel lightmap offset; no sprite
+// transparency tracker (pre-1.5 only).
+
+import net.minecraft.client.render.vertex.BufferBuilder;
 import net.minecraft.world.World;
-import org.embeddedt.embeddium.impl.common.util.MathUtil;
 import org.embeddedt.embeddium.impl.model.quad.properties.ModelQuadFacing;
 import org.embeddedt.embeddium.impl.render.chunk.RenderPassConfiguration;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildBuffers;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildContext;
-import org.embeddedt.embeddium.impl.render.chunk.sprite.SpriteTransparencyLevel;
 import org.embeddedt.embeddium.impl.render.chunk.terrain.material.Material;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexEncoder;
 import org.embeddedt.embeddium.impl.util.QuadUtil;
-import org.taumc.celeritas.impl.render.terrain.CeleritasWorldRenderer;
-import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderPassConfigurationBuilder;
-import org.taumc.celeritas.impl.render.terrain.SpriteTransparencyTracker;
 
+import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 
 public class PrimitiveChunkBuildContext extends ChunkBuildContext {
-    public static final int NUM_PASSES = 2;
-
     public final World world;
-    private final SpriteTransparencyTracker transparencyTracker;
 
     public final BufferBuilder tesselator;
+
+    private ByteBuffer rawDataSource;
+    private IntBuffer rawData;
 
     public PrimitiveChunkBuildContext(World world, RenderPassConfiguration renderPassConfiguration) {
         super(renderPassConfiguration);
         this.world = world;
-        this.transparencyTracker = CeleritasWorldRenderer.instance().getTransparencyTracker();
-        //? if >=1.8 {
-        //this.tesselator = new BufferBuilder(8192);
-        //?} else
-        this.tesselator = BufferBuilder.INSTANCE;
+        this.tesselator = new BufferBuilder(8192);
     }
 
     private final ChunkVertexEncoder.Vertex[] vertices = ChunkVertexEncoder.Vertex.uninitializedQuad();
 
-    private Material selectMaterial(Material material, SpriteTransparencyLevel transparencyLevel) {
-        if (transparencyLevel == SpriteTransparencyLevel.OPAQUE && material == PrimitiveRenderPassConfigurationBuilder.CUTOUT_MIPPED_MATERIAL) {
-            // Downgrade to solid
-            return PrimitiveRenderPassConfigurationBuilder.SOLID_MATERIAL;
-        } else if (material == PrimitiveRenderPassConfigurationBuilder.TRANSLUCENT_MATERIAL && transparencyLevel != SpriteTransparencyLevel.TRANSLUCENT) {
-            // Downgrade to cutout
-            return PrimitiveRenderPassConfigurationBuilder.CUTOUT_MIPPED_MATERIAL;
+    /**
+     * The tessellator's vertex data as ints from index 0. The view is only rebuilt when the tessellator has grown its
+     * buffer, which replaces the buffer object.
+     */
+    public IntBuffer rawVertexData() {
+        ByteBuffer buffer = this.tesselator.getBuffer();
+        if (buffer != this.rawDataSource) {
+            this.rawDataSource = buffer;
+            // duplicate() resets the byte order to big-endian; keep the tessellator's native order.
+            this.rawData = buffer.duplicate().order(buffer.order()).clear().asIntBuffer();
         }
-        return material;
+        return this.rawData;
     }
-
-    private static final int[] NORMAL_WINDING = new int[] {0, 1, 2, 3};
-    private static final int[] BACKFACE_WINDING = new int[] {3, 2, 1, 0};
 
     public void copyRawBuffer(IntBuffer rawBuffer, int vertexCount, ChunkBuildBuffers buffers, Material material) {
         if (vertexCount == 0) {
@@ -61,63 +57,33 @@ public class PrimitiveChunkBuildContext extends ChunkBuildContext {
             throw new IllegalStateException();
         }
 
-        var celeritasVertices = this.vertices;
-
-        int numQuads = vertexCount / 4;
-        outputQuads(rawBuffer, celeritasVertices, numQuads, buffers, material, NORMAL_WINDING);
-        //? if <1.7 {
-        if (material.pass == PrimitiveRenderPassConfigurationBuilder.TRANSLUCENT_PASS) {
-            // We need to emulate backface culling as the legacy renderer relies on it. Write the same quads again
-            // in reverse winding order.
-            outputQuads(rawBuffer, celeritasVertices, numQuads, buffers, material, BACKFACE_WINDING);
-        }
-        //?}
+        outputQuads(rawBuffer, this.vertices, vertexCount / 4, buffers, material);
     }
 
-    private void outputQuads(IntBuffer rawBuffer, ChunkVertexEncoder.Vertex[] celeritasVertices, int numQuads, ChunkBuildBuffers buffers, Material material, int[] winding) {
+    private void outputQuads(IntBuffer rawBuffer, ChunkVertexEncoder.Vertex[] celeritasVertices, int numQuads, ChunkBuildBuffers buffers, Material material) {
         int ptr = 0;
-        var tracker = this.transparencyTracker;
         for (int quadIdx = 0; quadIdx < numQuads; quadIdx++) {
-            float uSum = 0, vSum = 0;
             for (int vIdx = 0; vIdx < 4; vIdx++) {
-                var vertex = celeritasVertices[winding[vIdx]];
+                var vertex = celeritasVertices[vIdx];
                 vertex.x = Float.intBitsToFloat(rawBuffer.get(ptr++));
                 vertex.y = Float.intBitsToFloat(rawBuffer.get(ptr++));
                 vertex.z = Float.intBitsToFloat(rawBuffer.get(ptr++));
-
-                // In 1.8+, color comes before all UVs. In 1.7-, texture UV comes before color.
-                //? if >=1.8
-                //vertex.color = rawBuffer.get(ptr++);
-
-                float u = Float.intBitsToFloat(rawBuffer.get(ptr++));
-                float v = Float.intBitsToFloat(rawBuffer.get(ptr++));
-                vertex.u = u;
-                uSum += u;
-                vertex.v = v;
-                vSum += v;
-                //? if <1.8 {
+                // In 1.8+, color comes before all UVs.
                 vertex.color = rawBuffer.get(ptr++);
-                vertex.vanillaNormal = rawBuffer.get(ptr++);
-                //?}
-                vertex.light = rawBuffer.get(ptr++);
+                vertex.u = Float.intBitsToFloat(rawBuffer.get(ptr++));
+                vertex.v = Float.intBitsToFloat(rawBuffer.get(ptr++));
+                // Vanilla 1.8.9 samples the lightmap at (light + 8) / 256 (GameRenderer.enableLightMap's texture
+                // matrix), the centre of each light level's texel; Celeritas's shader samples at light / 256, the
+                // edge between two levels, which blends them (full daylight came out about 10% darker). Adding half a
+                // texel to the block and sky values here gives vanilla's coordinates; 240 + 8 still fits in 8 bits.
+                vertex.light = rawBuffer.get(ptr++) + 0x00080008;
             }
             int trueNormal = QuadUtil.calculateNormal(celeritasVertices);
             for (int vIdx = 0; vIdx < 4; vIdx++) {
-                celeritasVertices[winding[vIdx]].trueNormal = trueNormal;
+                celeritasVertices[vIdx].trueNormal = trueNormal;
             }
             ModelQuadFacing facing = QuadUtil.findNormalFace(trueNormal);
-            // TODO implement render pass downgrading for 1.5+
-            //? if <1.5 {
-            // Pretend the atlas is 256x256 for the purposes of computing the sprite ID
-            uSum /= 4;
-            vSum /= 4;
-            int spriteX = MathUtil.mojfloor(uSum * 256.0f);
-            int spriteY = MathUtil.mojfloor(vSum * 256.0f);
-            int spriteId = (spriteY / 16) * 16 + spriteX / 16;
-            Material correctMaterial = selectMaterial(material, tracker.getTransparencyLevel(spriteId));
-            //?} else
-            //Material correctMaterial = material;
-            buffers.get(correctMaterial).getVertexBuffer(facing).push(celeritasVertices, correctMaterial);
+            buffers.get(material).getVertexBuffer(facing).push(celeritasVertices, material);
         }
     }
 

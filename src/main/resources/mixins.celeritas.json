@@ -1,10 +1,19 @@
 {
   "required": true,
   "minVersion": "0.8",
-  "plugin": "org.taumc.celeritas.mixin.CeleritasPrimitiveMixinPlugin",
   "package": "org.taumc.celeritas.mixin",
-  "compatibilityLevel": "JAVA_8",
+  "compatibilityLevel": "JAVA_21",
   "client": [
+    "core.ClientChunkCacheAccessor",
+    "core.DebugOverlayMixin",
+    "core.FrustumCullerMixin",
+    "core.MultiplayerChunkCacheMixin",
+    "core.RenderChunkStorageMixin",
+    "core.TypeInstanceMultimapMixin",
+    "core.VanillaChunkBuilderMixin",
+    "core.WorldChunkAccessor",
+    "core.WorldMixin",
+    "core.WorldRendererMixin"
   ],
   "injectors": {
     "defaultRequire": 1
