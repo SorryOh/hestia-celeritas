@@ -109,6 +109,9 @@ every change. In short (2026-10-12):
   chunks, which vanilla draws as fog-coloured shapes against the sky, are left out; with the option on, the search
   reaches the corners (the render distance times the square root of 2) and fog occlusion is off. Both apply when the
   world renderer is made again (F3+A).
+- **Section visibility for other mods** (`org.taumc.celeritas.api.SectionVisibility`, 2026-10-13, build 5): whether
+  the current frame's visibility search reached any chunk section a box touches, answered by celeritas-common's own
+  `isBoxVisible` (the question Sodium's entity culling asks). Hestia uses it to skip entities hidden from the camera.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
