@@ -25,6 +25,7 @@ import org.embeddedt.embeddium.impl.render.chunk.sprite.SpriteTransparencyLevel;
 import org.embeddedt.embeddium.impl.render.chunk.terrain.material.Material;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexEncoder;
 import org.embeddedt.embeddium.impl.util.QuadUtil;
+import org.taumc.celeritas.api.BlockQuads;
 import org.taumc.celeritas.api.QuadSprites;
 import org.taumc.celeritas.impl.extensions.BakedQuadExtension;
 import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderPassConfigurationBuilder;
@@ -41,7 +42,8 @@ import java.util.List;
  * <li>faces hidden by a neighbouring slab or stair are left out ({@link FaceOcclusion});</li>
  * <li>quads with fully opaque sprites from cutout blocks go to the solid pass, which skips the alpha test: the grass
  * block's top, bottom and sides, for example, while its tinted side overlay stays in the cutout pass;</li>
- * <li>another mod's {@link QuadSprites} provider (connected textures) may draw a quad with a different sprite.</li>
+ * <li>another mod's {@link QuadSprites} provider (connected textures) may draw a quad with a different sprite;</li>
+ * <li>another mod's {@link BlockQuads} handler may draw it turned, recolored, in parts, with overlays, or not at all.</li>
  * </ul>
  * One per builder thread.
  */
@@ -77,6 +79,19 @@ public class BlockModelPipeline {
     private TextureAtlasSprite fromSprite;
     private TextureAtlasSprite toSprite;
 
+    // BlockQuads: the handler for this block (null when none is set) and the quad handed to it, with its light, shade
+    // (1 on the flat path, where vanilla bakes the face shade into the colors) and own tint (-1 for none).
+    private BlockQuads.Handler quadHandler;
+    private final QuadOutput quadOutput = new QuadOutput();
+    private BakedQuad handledQuad;
+    private int[] handledData;
+    private TextureAtlasSprite handledSprite;
+    private final int[] handledLight = new int[4];
+    private final float[] handledShade = new float[4];
+    private int handledTint;
+    private Material handledMaterial;
+    private Material handledOpaqueMaterial;
+
     public BlockModelPipeline(BlockModelRenderer vanilla, BlockModelShaper models) {
         this.vanilla = vanilla;
         this.models = models;
@@ -108,6 +123,7 @@ public class BlockModelPipeline {
         this.tintIndex = Integer.MIN_VALUE;
         this.state = state;
         this.spriteProvider = QuadSprites.getProvider();
+        this.quadHandler = BlockQuads.getHandler();
 
         // Opaque quads may move to the solid pass: the mipmapped one from cutout_mipped, one without mipmaps from
         // cutout. The translucent pass blends, so its quads stay.
@@ -193,10 +209,15 @@ public class BlockModelPipeline {
                 continue;
             }
             Direction face = quad.getFace();
-            this.chooseSprite(view, pos, quad, face);
             this.vanilla.computeFaceShape(block, data, face, this.faceShape, this.faceFlags);
             ao.compute(view, block, pos, face, this.faceShape, this.faceFlags);
             float[] shade = ao.brightness;
+            int[] light = ao.lightMap;
+            if (this.quadHandler != null
+                    && this.handleQuad(view, block, pos, quad, face, data, shade, light[0], light[1], light[2], light[3], material, opaqueMaterial)) {
+                continue;
+            }
+            this.chooseSprite(view, pos, quad, face);
 
             if (quad.hasTint()) {
                 int tint = this.tint(view, block, pos, quad.getTintIndex());
@@ -212,7 +233,6 @@ public class BlockModelPipeline {
                 }
             }
 
-            int[] light = ao.lightMap;
             this.emit(data, light[0], light[1], light[2], light[3], pick(quad, material, opaqueMaterial));
         }
     }
@@ -226,7 +246,6 @@ public class BlockModelPipeline {
             if (covered != null && FaceOcclusion.isHidden(data, cullFace, covered)) {
                 continue;
             }
-            this.chooseSprite(view, pos, quad, quad.getFace());
             int light = faceLight;
             if (cullFace == null) {
                 Direction face = quad.getFace();
@@ -235,6 +254,11 @@ public class BlockModelPipeline {
                         ? block.getLightColor(view, this.neighborPos.set(pos.getX() + face.getOffsetX(), pos.getY() + face.getOffsetY(), pos.getZ() + face.getOffsetZ()))
                         : block.getLightColor(view, pos);
             }
+            if (this.quadHandler != null
+                    && this.handleQuad(view, block, pos, quad, quad.getFace(), data, null, light, light, light, light, material, opaqueMaterial)) {
+                continue;
+            }
+            this.chooseSprite(view, pos, quad, quad.getFace());
 
             if (quad.hasTint()) {
                 int tint = this.tint(view, block, pos, quad.getTintIndex());
@@ -292,6 +316,205 @@ public class BlockModelPipeline {
             this.fromSprite = from;
             this.toSprite = to;
         }
+    }
+
+    // BlockQuads: hands the quad (its light and shade worked out) to the handler; true when the handler drew it.
+    private boolean handleQuad(WorldView view, Block block, BlockPos pos, BakedQuad quad, Direction face, int[] data, float[] shade,
+                               int light0, int light1, int light2, int light3, Material material, Material opaqueMaterial) {
+        TextureAtlasSprite sprite = QuadSprites.getSprite(quad);
+        if (sprite == null || !(sprite.getUMax() > sprite.getUMin()) || !(sprite.getVMax() > sprite.getVMin())) {
+            return false;
+        }
+        this.handledQuad = quad;
+        this.handledData = data;
+        this.handledSprite = sprite;
+        this.handledLight[0] = light0;
+        this.handledLight[1] = light1;
+        this.handledLight[2] = light2;
+        this.handledLight[3] = light3;
+        for (int v = 0; v < 4; v++) {
+            this.handledShade[v] = shade != null ? shade[v] : 1.0F;
+        }
+        this.handledTint = quad.hasTint() ? this.tint(view, block, pos, quad.getTintIndex()) & 0xFFFFFF : -1;
+        this.handledMaterial = material;
+        this.handledOpaqueMaterial = opaqueMaterial;
+        return this.quadHandler.handle(view, this.state, pos, face, quad, sprite, this.quadOutput);
+    }
+
+    /** What a BlockQuads handler draws, into this section's buffers. */
+    private final class QuadOutput implements BlockQuads.Output {
+        @Override
+        public void quad(TextureAtlasSprite sprite, int rotation, boolean flip) {
+            BlockModelPipeline.this.emitHandled(sprite, rotation, flip, BlockModelPipeline.this.handledTint);
+        }
+
+        @Override
+        public void tinted(TextureAtlasSprite sprite, int rotation, boolean flip, int color) {
+            BlockModelPipeline.this.emitHandled(sprite, rotation, flip, color & 0xFFFFFF);
+        }
+
+        @Override
+        public void part(TextureAtlasSprite sprite, float s0, float t0, float s1, float t1) {
+            BlockModelPipeline.this.emitPart(sprite, s0, t0, s1, t1);
+        }
+
+        @Override
+        public void overlay(TextureAtlasSprite sprite, int color, boolean fullBright) {
+            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright);
+        }
+    }
+
+    // The handled quad's texture coordinate of vertex v, as a fraction (0-1) across its sprite.
+    private float handledS(int v) {
+        TextureAtlasSprite from = this.handledSprite;
+        return (Float.intBitsToFloat(this.handledData[v * 7 + 4]) - from.getUMin()) / (from.getUMax() - from.getUMin());
+    }
+
+    private float handledT(int v) {
+        TextureAtlasSprite from = this.handledSprite;
+        return (Float.intBitsToFloat(this.handledData[v * 7 + 5]) - from.getVMin()) / (from.getVMax() - from.getVMin());
+    }
+
+    // The vertex color of the handled quad: the baked color times the shade, times the tint (0xRRGGBB) unless -1.
+    private int handledColor(int v, int tint) {
+        float shade = this.handledShade[v];
+        if (tint < 0) {
+            return multiplyColor(this.handledData[v * 7 + 3], shade, shade, shade);
+        }
+        return multiplyColor(this.handledData[v * 7 + 3], shade * (float) (tint >> 16 & 255) / 255.0F,
+                shade * (float) (tint >> 8 & 255) / 255.0F, shade * (float) (tint & 255) / 255.0F);
+    }
+
+    private void emitHandled(TextureAtlasSprite to, int rotation, boolean flip, int tint) {
+        ChunkVertexEncoder.Vertex[] out = this.vertices;
+        int[] data = this.handledData;
+        for (int v = 0; v < 4; v++) {
+            ChunkVertexEncoder.Vertex vertex = out[v];
+            int base = v * 7;
+            vertex.x = this.blockX + Float.intBitsToFloat(data[base]);
+            vertex.y = this.blockY + Float.intBitsToFloat(data[base + 1]);
+            vertex.z = this.blockZ + Float.intBitsToFloat(data[base + 2]);
+            float s = this.handledS(v);
+            float t = this.handledT(v);
+            // Quarter turns, then the mirror, about the sprite's middle.
+            for (int r = rotation & 3; r > 0; r--) {
+                float turned = t;
+                t = 1.0F - s;
+                s = turned;
+            }
+            if (flip) {
+                s = 1.0F - s;
+            }
+            vertex.u = to.getUMin() + s * (to.getUMax() - to.getUMin());
+            vertex.v = to.getVMin() + t * (to.getVMax() - to.getVMin());
+            vertex.color = this.handledColor(v, tint);
+            vertex.light = this.handledLight[v] + LIGHTMAP_TEXEL_CENTRE;
+        }
+        this.toSprite = to == this.handledSprite ? null : to;
+        this.push(out, this.pick(this.handledQuad, this.handledMaterial, this.handledOpaqueMaterial));
+        this.toSprite = null;
+    }
+
+    private void emitPart(TextureAtlasSprite to, float s0, float t0, float s1, float t1) {
+        // The corners' places on the texture square; parts need each vertex at a different corner.
+        int[] corner = this.cornerIndex;
+        boolean corners = true;
+        for (int v = 0; v < 4 && corners; v++) {
+            float s = this.handledS(v);
+            float t = this.handledT(v);
+            int cs = s < 0.01F ? 0 : s > 0.99F ? 1 : -1;
+            int ct = t < 0.01F ? 0 : t > 0.99F ? 1 : -1;
+            if (cs < 0 || ct < 0) {
+                corners = false;
+            } else {
+                corner[v] = cs | ct << 1;
+            }
+        }
+        if (corners) {
+            int seen = 0;
+            for (int v = 0; v < 4; v++) {
+                seen |= 1 << corner[v];
+            }
+            corners = seen == 15;
+        }
+        if (!corners) {
+            this.emitHandled(to, 0, false, this.handledTint);
+            return;
+        }
+        int[] byCorner = this.vertexAtCorner;
+        for (int v = 0; v < 4; v++) {
+            byCorner[corner[v]] = v;
+        }
+        int[] data = this.handledData;
+        ChunkVertexEncoder.Vertex[] out = this.vertices;
+        for (int v = 0; v < 4; v++) {
+            ChunkVertexEncoder.Vertex vertex = out[v];
+            float s = (corner[v] & 1) == 0 ? s0 : s1;
+            float t = (corner[v] & 2) == 0 ? t0 : t1;
+            // Bilinear weights of the four corners (0: s0 t0 ... as corner = cs | ct << 1).
+            float w0 = (1.0F - s) * (1.0F - t);
+            float w1 = s * (1.0F - t);
+            float w2 = (1.0F - s) * t;
+            float w3 = s * t;
+            int a = byCorner[0] * 7, b = byCorner[1] * 7, c = byCorner[2] * 7, d = byCorner[3] * 7;
+            vertex.x = this.blockX + w0 * Float.intBitsToFloat(data[a]) + w1 * Float.intBitsToFloat(data[b]) + w2 * Float.intBitsToFloat(data[c]) + w3 * Float.intBitsToFloat(data[d]);
+            vertex.y = this.blockY + w0 * Float.intBitsToFloat(data[a + 1]) + w1 * Float.intBitsToFloat(data[b + 1]) + w2 * Float.intBitsToFloat(data[c + 1]) + w3 * Float.intBitsToFloat(data[d + 1]);
+            vertex.z = this.blockZ + w0 * Float.intBitsToFloat(data[a + 2]) + w1 * Float.intBitsToFloat(data[b + 2]) + w2 * Float.intBitsToFloat(data[c + 2]) + w3 * Float.intBitsToFloat(data[d + 2]);
+            vertex.u = to.getUMin() + s * (to.getUMax() - to.getUMin());
+            vertex.v = to.getVMin() + t * (to.getVMax() - to.getVMin());
+            vertex.color = blendColors(this.handledColor(byCorner[0], this.handledTint), this.handledColor(byCorner[1], this.handledTint),
+                    this.handledColor(byCorner[2], this.handledTint), this.handledColor(byCorner[3], this.handledTint), w0, w1, w2, w3);
+            vertex.light = blendLight(this.handledLight[byCorner[0]], this.handledLight[byCorner[1]], this.handledLight[byCorner[2]],
+                    this.handledLight[byCorner[3]], w0, w1, w2, w3) + LIGHTMAP_TEXEL_CENTRE;
+        }
+        this.toSprite = to == this.handledSprite ? null : to;
+        this.push(out, this.pick(this.handledQuad, this.handledMaterial, this.handledOpaqueMaterial));
+        this.toSprite = null;
+    }
+
+    private final int[] cornerIndex = new int[4];
+    private final int[] vertexAtCorner = new int[4];
+
+    private void emitOverlay(TextureAtlasSprite to, int color, boolean fullBright) {
+        ChunkVertexEncoder.Vertex[] out = this.vertices;
+        int[] data = this.handledData;
+        for (int v = 0; v < 4; v++) {
+            ChunkVertexEncoder.Vertex vertex = out[v];
+            int base = v * 7;
+            vertex.x = this.blockX + Float.intBitsToFloat(data[base]);
+            vertex.y = this.blockY + Float.intBitsToFloat(data[base + 1]);
+            vertex.z = this.blockZ + Float.intBitsToFloat(data[base + 2]);
+            vertex.u = to.getUMin() + this.handledS(v) * (to.getUMax() - to.getUMin());
+            vertex.v = to.getVMin() + this.handledT(v) * (to.getVMax() - to.getVMin());
+            if (fullBright) {
+                vertex.color = data[base + 3] | 0x00FFFFFF;
+                vertex.light = 0x00F000F0 + LIGHTMAP_TEXEL_CENTRE;
+            } else {
+                vertex.color = this.handledColor(v, color >= 0 ? color & 0xFFFFFF : this.handledTint);
+                vertex.light = this.handledLight[v] + LIGHTMAP_TEXEL_CENTRE;
+            }
+        }
+        if (this.animatedSprites != null && AnimatedSprites.isAnimated(to)) {
+            this.animatedSprites.add(to);
+        }
+        this.push(out, PrimitiveRenderPassConfigurationBuilder.CUTOUT_MIPPED_MATERIAL);
+    }
+
+    // Per-channel bilinear blend of four little-endian colors.
+    private static int blendColors(int c0, int c1, int c2, int c3, float w0, float w1, float w2, float w3) {
+        int result = 0;
+        for (int shift = 0; shift < 32; shift += 8) {
+            float value = w0 * (c0 >>> shift & 255) + w1 * (c1 >>> shift & 255) + w2 * (c2 >>> shift & 255) + w3 * (c3 >>> shift & 255);
+            result |= Math.min(255, Math.round(value)) << shift;
+        }
+        return result;
+    }
+
+    // The same for packed lightmap coordinates (block light low, sky light high).
+    private static int blendLight(int l0, int l1, int l2, int l3, float w0, float w1, float w2, float w3) {
+        int block = Math.round(w0 * (l0 & 0xFFFF) + w1 * (l1 & 0xFFFF) + w2 * (l2 & 0xFFFF) + w3 * (l3 & 0xFFFF));
+        int sky = Math.round(w0 * (l0 >>> 16) + w1 * (l1 >>> 16) + w2 * (l2 >>> 16) + w3 * (l3 >>> 16));
+        return sky << 16 | block;
     }
 
     private void emit(int[] data, int light0, int light1, int light2, int light3, Material material) {

@@ -118,6 +118,14 @@ every change. In short (2026-10-12):
   every quad whose sprite FaceBakery recorded and whose coordinates stay inside it. A quad drawn with another sprite
   moves to the solid pass only if both sprites are opaque, and an animated replacement is reported like the quad's own
   sprite would be. With no provider nothing changes. Hestia uses it for resource packs' connected textures.
+- **Block quads for other mods** (`org.taumc.celeritas.api.BlockQuads`, 2026-10-14, build 7): a handler another mod
+  sets is handed every model block quad whose sprite is known, with its light and shade already worked out as vanilla
+  does, and may draw it differently: with another sprite turned by quarter turns and mirrored, with another color in
+  place of its tint (also on quads without one), in parts (a rectangle of its texture square drawn with the same part
+  of another sprite, the corners' light and color blended across it), with extra quads over it in the cutout pass
+  (optionally at full brightness), or not at all. Quads the handler leaves alone go on to the `QuadSprites` provider
+  and are drawn as before. With no handler nothing changes. Hestia uses it for resource packs' natural textures,
+  better grass, connected textures' overlay and compact methods, emissive block textures and custom block colors.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
