@@ -25,8 +25,10 @@ import org.embeddedt.embeddium.impl.render.chunk.sprite.SpriteTransparencyLevel;
 import org.embeddedt.embeddium.impl.render.chunk.terrain.material.Material;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexEncoder;
 import org.embeddedt.embeddium.impl.util.QuadUtil;
+import org.taumc.celeritas.api.QuadSprites;
 import org.taumc.celeritas.impl.extensions.BakedQuadExtension;
 import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderPassConfigurationBuilder;
+import org.taumc.celeritas.impl.texture.AnimatedSprites;
 
 import java.util.BitSet;
 import java.util.Collection;
@@ -38,7 +40,8 @@ import java.util.List;
  * <ul>
  * <li>faces hidden by a neighbouring slab or stair are left out ({@link FaceOcclusion});</li>
  * <li>quads with fully opaque sprites from cutout blocks go to the solid pass, which skips the alpha test: the grass
- * block's top, bottom and sides, for example, while its tinted side overlay stays in the cutout pass.</li>
+ * block's top, bottom and sides, for example, while its tinted side overlay stays in the cutout pass;</li>
+ * <li>another mod's {@link QuadSprites} provider (connected textures) may draw a quad with a different sprite.</li>
  * </ul>
  * One per builder thread.
  */
@@ -67,6 +70,12 @@ public class BlockModelPipeline {
     private float blockX, blockY, blockZ;
     private int tintIndex;
     private int tint;
+    // The block's state and the QuadSprites provider for it (null when none is set).
+    private BlockState state;
+    private QuadSprites.Provider spriteProvider;
+    // The quad being emitted: the sprite it was baked with and the one it is drawn with instead (null: unchanged).
+    private TextureAtlasSprite fromSprite;
+    private TextureAtlasSprite toSprite;
 
     public BlockModelPipeline(BlockModelRenderer vanilla, BlockModelShaper models) {
         this.vanilla = vanilla;
@@ -97,6 +106,8 @@ public class BlockModelPipeline {
 
         this.placeBlock(block, pos, smooth);
         this.tintIndex = Integer.MIN_VALUE;
+        this.state = state;
+        this.spriteProvider = QuadSprites.getProvider();
 
         // Opaque quads may move to the solid pass: the mipmapped one from cutout_mipped, one without mipmaps from
         // cutout. The translucent pass blends, so its quads stay.
@@ -182,6 +193,7 @@ public class BlockModelPipeline {
                 continue;
             }
             Direction face = quad.getFace();
+            this.chooseSprite(view, pos, quad, face);
             this.vanilla.computeFaceShape(block, data, face, this.faceShape, this.faceFlags);
             ao.compute(view, block, pos, face, this.faceShape, this.faceFlags);
             float[] shade = ao.brightness;
@@ -214,6 +226,7 @@ public class BlockModelPipeline {
             if (covered != null && FaceOcclusion.isHidden(data, cullFace, covered)) {
                 continue;
             }
+            this.chooseSprite(view, pos, quad, quad.getFace());
             int light = faceLight;
             if (cullFace == null) {
                 Direction face = quad.getFace();
@@ -262,8 +275,29 @@ public class BlockModelPipeline {
         return color & 0xFF000000 | b << 16 | g << 8 | r;
     }
 
+    // QuadSprites: the sprite the quad is drawn with, when a provider gives it another one.
+    private void chooseSprite(WorldView view, BlockPos pos, BakedQuad quad, Direction face) {
+        this.fromSprite = null;
+        this.toSprite = null;
+        QuadSprites.Provider provider = this.spriteProvider;
+        if (provider == null) {
+            return;
+        }
+        TextureAtlasSprite from = QuadSprites.getSprite(quad);
+        if (from == null) {
+            return;
+        }
+        TextureAtlasSprite to = provider.getSprite(view, this.state, pos, face, quad, from);
+        if (to != null && to != from && from.getUMax() > from.getUMin() && from.getVMax() > from.getVMin()) {
+            this.fromSprite = from;
+            this.toSprite = to;
+        }
+    }
+
     private void emit(int[] data, int light0, int light1, int light2, int light3, Material material) {
         ChunkVertexEncoder.Vertex[] out = this.vertices;
+        TextureAtlasSprite from = this.fromSprite;
+        TextureAtlasSprite to = this.toSprite;
         for (int v = 0; v < 4; v++) {
             ChunkVertexEncoder.Vertex vertex = out[v];
             int base = v * 7;
@@ -273,6 +307,16 @@ public class BlockModelPipeline {
             vertex.color = this.colors[v];
             vertex.u = Float.intBitsToFloat(data[base + 4]);
             vertex.v = Float.intBitsToFloat(data[base + 5]);
+        }
+        if (to != null) {
+            // The same place in the new sprite.
+            float scaleU = (to.getUMax() - to.getUMin()) / (from.getUMax() - from.getUMin());
+            float scaleV = (to.getVMax() - to.getVMin()) / (from.getVMax() - from.getVMin());
+            for (int v = 0; v < 4; v++) {
+                ChunkVertexEncoder.Vertex vertex = out[v];
+                vertex.u = to.getUMin() + (vertex.u - from.getUMin()) * scaleU;
+                vertex.v = to.getVMin() + (vertex.v - from.getVMin()) * scaleV;
+            }
         }
         out[0].light = light0 + LIGHTMAP_TEXEL_CENTRE;
         out[1].light = light1 + LIGHTMAP_TEXEL_CENTRE;
@@ -292,15 +336,29 @@ public class BlockModelPipeline {
         this.buffers.get(material).getVertexBuffer(facing).push(quad, material);
     }
 
-    // The quad's material, noting its sprite when that is animated.
+    // The quad's material, noting its sprite when that is animated. A quad drawn with another sprite (QuadSprites) moves
+    // to the solid pass only if both sprites are opaque, so the order canUseOpaquePass worked out still holds.
     private Material pick(BakedQuad quad, Material material, Material opaqueMaterial) {
+        TextureAtlasSprite replacement = this.toSprite;
         if (this.animatedSprites != null) {
-            TextureAtlasSprite animated = ((BakedQuadExtension) quad).celeritas$getAnimatedSprite();
-            if (animated != null) {
-                this.animatedSprites.add(animated);
+            if (replacement != null) {
+                if (AnimatedSprites.isAnimated(replacement)) {
+                    this.animatedSprites.add(replacement);
+                }
+            } else {
+                TextureAtlasSprite animated = ((BakedQuadExtension) quad).celeritas$getAnimatedSprite();
+                if (animated != null) {
+                    this.animatedSprites.add(animated);
+                }
             }
         }
-        return opaqueMaterial != null && isOpaque(quad) ? opaqueMaterial : material;
+        if (opaqueMaterial == null || !isOpaque(quad)) {
+            return material;
+        }
+        if (replacement != null && SpriteTransparencyLevel.Holder.getTransparencyLevel(replacement) != SpriteTransparencyLevel.OPAQUE) {
+            return material;
+        }
+        return opaqueMaterial;
     }
 
     /**

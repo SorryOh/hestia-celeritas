@@ -5,7 +5,10 @@ package org.taumc.celeritas.impl.texture;
 import net.minecraft.client.render.texture.TextureAtlasSprite;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Set;
 
 /**
  * The block atlas's animated sprites, copied each time it is stitched (TextureAtlasMixin), to find the sprite of a quad
@@ -13,12 +16,21 @@ import java.util.List;
  */
 public final class AnimatedSprites {
     private static volatile TextureAtlasSprite[] sprites = new TextureAtlasSprite[0];
+    private static volatile Set<TextureAtlasSprite> set = Collections.emptySet();
 
     private AnimatedSprites() {
     }
 
     public static void onStitched(List<TextureAtlasSprite> animated) {
+        Set<TextureAtlasSprite> newSet = Collections.newSetFromMap(new IdentityHashMap<>());
+        newSet.addAll(animated);
+        set = newSet;
         sprites = animated.toArray(new TextureAtlasSprite[0]);
+    }
+
+    /** Whether the block atlas animates {@code sprite} (for the sprites QuadSprites providers hand out). */
+    public static boolean isAnimated(TextureAtlasSprite sprite) {
+        return set.contains(sprite);
     }
 
     /** The animated sprite whose area holds the middle of the quad's texture coordinates, or null. */

@@ -112,6 +112,12 @@ every change. In short (2026-10-12):
 - **Section visibility for other mods** (`org.taumc.celeritas.api.SectionVisibility`, 2026-10-13, build 5): whether
   the current frame's visibility search reached any chunk section a box touches, answered by celeritas-common's own
   `isBoxVisible` (the question Sodium's entity culling asks). Hestia uses it to skip entities hidden from the camera.
+- **Quad sprites for other mods** (`org.taumc.celeritas.api.QuadSprites`, 2026-10-13, build 6): a provider another mod
+  sets may draw a block model's quad with a different sprite of the block atlas while chunks are built; the quad keeps
+  its shape, light and color, and its texture coordinates move to the same place in the new sprite. It is asked for
+  every quad whose sprite FaceBakery recorded and whose coordinates stay inside it. A quad drawn with another sprite
+  moves to the solid pass only if both sprites are opaque, and an animated replacement is reported like the quad's own
+  sprite would be. With no provider nothing changes. Hestia uses it for resource packs' connected textures.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
