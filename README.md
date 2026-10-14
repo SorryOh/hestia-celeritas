@@ -126,6 +126,15 @@ every change. In short (2026-10-12):
   (optionally at full brightness), or not at all. Quads the handler leaves alone go on to the `QuadSprites` provider
   and are drawn as before. With no handler nothing changes. Hestia uses it for resource packs' natural textures,
   better grass, connected textures' overlay and compact methods, emissive block textures and custom block colors.
+- **Section occlusion for other mods** (`org.taumc.celeritas.api.SectionOcclusion`, 2026-10-14, build 8): while
+  another mod sets a test, the chunk renderer draws without the visible sections the test reports hidden. The frame's
+  render lists are filtered once (`OccludedRenderLists`, on the first terrain pass after `beginFrame`) and every pass
+  draws from them; a region's filtered list is kept while its sections stay the same. The visibility search, block
+  entities, entities and animated sprites still use the unfiltered lists. With no test nothing changes. A listener
+  (`setGeometryListener`) hears of every section whose geometry changes: each upload of a rebuild, and each section
+  added or removed (`updateSectionInfo`, on the render thread before the terrain draws). Hestia uses both to leave out
+  sections wholly behind the depth of an earlier frame while the GPU is the slower side, trusting that depth nowhere a
+  section changed since it was drawn.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a

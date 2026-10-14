@@ -7,6 +7,8 @@ package org.taumc.celeritas.impl.render.terrain;
 // sections around theirs (WorldSlice.prepare, cached as in Celeritas's 1.12.2 version), and F3 shows the build rate.
 // The builder thread count and the fogged-chunk option come from CeleritasSettings; visible sections report their
 // animated sprites (VisibleSectionSpriteTicker), as Celeritas's 1.12.2 version marks them for its animation filter.
+// Hestia build 8 (2026-10-14): the chunk renderer draws without the sections SectionOcclusion's test reports hidden;
+// every change of a section's geometry is reported to SectionOcclusion's listener.
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -14,21 +16,27 @@ import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.chunk.WorldChunkSection;
 import org.embeddedt.embeddium.impl.gl.device.CommandList;
 import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
+import org.embeddedt.embeddium.impl.render.chunk.ChunkRenderMatrices;
 import org.embeddedt.embeddium.impl.render.chunk.DefaultChunkRenderer;
 import org.embeddedt.embeddium.impl.render.chunk.RenderPassConfiguration;
 import org.embeddedt.embeddium.impl.render.chunk.RenderSection;
 import org.embeddedt.embeddium.impl.render.chunk.RenderSectionManager;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
 import org.embeddedt.embeddium.impl.render.chunk.compile.tasks.ChunkBuilderTask;
+import org.embeddedt.embeddium.impl.render.chunk.data.BuiltRenderSectionData;
 import org.embeddedt.embeddium.impl.render.chunk.fog.FogService;
+import org.embeddedt.embeddium.impl.render.chunk.lists.ChunkRenderListIterable;
 import org.embeddedt.embeddium.impl.render.chunk.lists.SectionTicker;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderInterface;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderTextureSlot;
+import org.embeddedt.embeddium.impl.render.chunk.terrain.TerrainRenderPass;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexType;
+import org.embeddedt.embeddium.impl.render.viewport.CameraTransform;
 import org.embeddedt.embeddium.impl.render.viewport.Viewport;
 import org.jetbrains.annotations.Nullable;
 import org.taumc.celeritas.api.CeleritasSettings;
+import org.taumc.celeritas.api.SectionOcclusion;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.render.terrain.compile.task.ChunkBuilderMeshingTask;
 import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
@@ -181,6 +189,14 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
         super.invalidateCachedSectionData(section);
     }
 
+    // Every upload of a rebuild's geometry and every new or removed section goes through here.
+    @Override
+    protected boolean updateSectionInfo(RenderSection render, @Nullable BuiltRenderSectionData info) {
+        boolean changed = super.updateSectionInfo(render, info);
+        SectionOcclusion.geometryChanged(render.getChunkX(), render.getChunkY(), render.getChunkZ());
+        return changed;
+    }
+
     @Override
     public void updateChunks(boolean updateImmediately) {
         this.sectionCache.cleanup();
@@ -205,6 +221,7 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
     }
 
     private static class ChunkRenderer extends DefaultChunkRenderer {
+        private final OccludedRenderLists occluded = new OccludedRenderLists();
 
         public ChunkRenderer(RenderDevice device, RenderPassConfiguration<?> renderPassConfiguration) {
             super(device, renderPassConfiguration, GLStateManagerFogService.INSTANCE);
@@ -214,6 +231,17 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
         protected void configureShaderInterface(ChunkShaderInterface shader) {
             shader.setTextureSlot(ChunkShaderTextureSlot.BLOCK, 0);
             shader.setTextureSlot(ChunkShaderTextureSlot.LIGHT, 1);
+        }
+
+        // Another mod's section test (SectionOcclusion) leaves sections out of the draws: the lists are filtered once
+        // per frame and every pass draws from the filtered ones.
+        @Override
+        public void render(ChunkRenderMatrices matrices, CommandList commandList, ChunkRenderListIterable renderLists, TerrainRenderPass pass, CameraTransform camera, CameraTransform previousCamera) {
+            SectionOcclusion.Test test = SectionOcclusion.getTest();
+            if (test != null) {
+                renderLists = this.occluded.filter(renderLists, test);
+            }
+            super.render(matrices, commandList, renderLists, pass, camera, previousCamera);
         }
     }
 }
