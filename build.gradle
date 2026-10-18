@@ -30,6 +30,10 @@ repositories {
 		url = "https://maven.cloverclient.com/releases"
 		content { includeGroup "pl.tomgirl" }
 	}
+	// LWJGL's shaderc binding for the Vulkan shaders' build step (never in the jar).
+	mavenCentral {
+		content { includeGroup "org.lwjgl" }
+	}
 }
 
 configurations {
@@ -90,6 +94,44 @@ processResources {
 		expand "version": inputs.properties.version
 	}
 }
+
+// Hestia build (2026-10-18): the Vulkan versions of the chunk shaders (README.md, "Vulkan shaders"): GLSL 450 in
+// src/main/vulkan, compiled to SPIR-V at build time by tools/shaders with LWJGL's shaderc binding at Pylon's LWJGL
+// version (one fixed compiler, so the same SPIR-V and the same jar on every machine) into the jar's
+// assets/celeritas/vulkan. The tool and shaderc never go into the jar; GL mode never reads these files.
+sourceSets {
+	shaderTool {
+		java {
+			srcDir "tools/shaders"
+		}
+	}
+}
+
+dependencies {
+	shaderToolImplementation "org.lwjgl:lwjgl:${project.lwjgl_version}"
+	shaderToolImplementation "org.lwjgl:lwjgl-shaderc:${project.lwjgl_version}"
+	["natives-windows", "natives-linux", "natives-macos", "natives-macos-arm64"].each {
+		shaderToolRuntimeOnly "org.lwjgl:lwjgl:${project.lwjgl_version}:${it}"
+		shaderToolRuntimeOnly "org.lwjgl:lwjgl-shaderc:${project.lwjgl_version}:${it}"
+	}
+}
+
+def vulkanShaderOutput = layout.buildDirectory.dir("generated/vulkan")
+def compileVulkanShaders = tasks.register("compileVulkanShaders", JavaExec) {
+	group = "build"
+	description = "Compiles the Vulkan versions of the chunk shaders (src/main/vulkan) to SPIR-V."
+	classpath = sourceSets.shaderTool.runtimeClasspath
+	mainClass = "org.taumc.celeritas.tools.shaders.CompileVulkanShaders"
+	javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+	// LWJGL loads shaderc's native library.
+	jvmArgs "--enable-native-access=ALL-UNNAMED"
+	def source = file("src/main/vulkan")
+	def target = vulkanShaderOutput.get().dir("assets/celeritas/vulkan").asFile
+	inputs.dir(source)
+	outputs.dir(vulkanShaderOutput)
+	args = [source.absolutePath, target.absolutePath]
+}
+sourceSets.main.resources.srcDir(compileVulkanShaders)
 
 java {
 	// JDK 25 compiles; the bytecode is Java 21, the oldest Java upstream supports for these Minecraft versions.

@@ -1,0 +1,38 @@
+# Hestia build (2026-10-18): the Vulkan versions of Celeritas's GL programs, for Kora's Vulkan renderer (README.md,
+# "Vulkan shaders"; Kora's vk/layer/Programs.kt reads this file). A GL shader is known by the SHA-256 of its source as
+# ShaderLoader builds it (imports resolved, ShaderLoaderMixin's fog change made), without the #define lines ShaderParser
+# puts right after #version; those defines pick the SPIR-V variant (spirv.txt, which the build writes). When
+# celeritas-common's shaders or ShaderLoaderMixin change, Kora's renderer logs the new hash and draws no terrain
+# (-Dhestia.vk.shaderDump=<folder> writes the sources there): port the change into src/main/vulkan, then update it here.
+#
+# program <name>
+# shader <vertex|fragment> <sha-256> <Vulkan source> [macro ...]
+# attribute <name> <location>
+# uniform <name> <block|push> <byte offset> <float|vec2|vec3|vec4|int|ivec2|mat3|mat4>
+# sampler <name> <push offset of the texture slot; the sampler slot follows>
+# alpharef <push offset of GL's alpha test reference>
+
+program chunk
+# blocks/block_layer_opaque.vsh and .fsh with vanilla's linear fog (ShaderLoaderMixin)
+shader vertex 4114f8d962ceafb93ca1c3041c2510daa4d9a3dd8a5e2bbcddbb5e1ded2cf2ea block_layer_opaque.vert
+shader fragment 94b7a55a7445d26c79f2c264895f93b91a1e722870c6b320d33e84a3d450ba5e block_layer_opaque.frag
+# the same with celeritas-common's smoothstep fog (-Dceleritas.upstreamFog=true)
+shader vertex d6b8465a9526933809c2401bf8ca8f7e367c693d2dced88ba65541fd1e2fef33 block_layer_opaque.vert
+shader fragment acc96989c69d99a7c5c56b50734ae649956b9a4057ee5657a25b2268f389aae6 block_layer_opaque.frag UPSTREAM_FOG
+# the vertex format's attributes, at the locations ShaderChunkRenderer binds them to (the format's order)
+attribute a_PosId 0
+attribute a_Color 1
+attribute a_TexCoord 2
+attribute a_LightCoord 3
+attribute a_RdhFactor 4
+uniform u_ModelViewMatrix block 0 mat4
+uniform u_ProjectionMatrix block 64 mat4
+uniform u_FogColor block 128 vec4
+uniform u_FogShape block 144 int
+uniform u_FogStart block 148 float
+uniform u_FogEnd block 152 float
+uniform u_FogDensity block 156 float
+uniform u_RegionOffset push 0 vec3
+sampler u_BlockTex 12
+sampler u_LightTex 20
+alpharef 28

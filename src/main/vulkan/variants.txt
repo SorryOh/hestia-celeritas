@@ -1,0 +1,16 @@
+# The define sets the 1.8.9 module's terrain passes give Celeritas's chunk shaders (ChunkShaderOptions.constants: the
+# fog mode, fragment discard for the cutout pass, the vanilla-like vertex format's scales), each compiled to SPIR-V by
+# the build (tools/shaders/CompileVulkanShaders.java). "shader" names a source in this folder; "always" lists macros
+# every variant has; each "choose" line lists alternatives separated by "|" (an empty one: none of them); the variants
+# are every combination. A macro is NAME or NAME=VALUE.
+
+shader block_layer_opaque.vert
+always VERT_POS_SCALE=1.0 VERT_POS_OFFSET=0.0 VERT_TEX_SCALE=1.0
+choose | USE_FOG USE_FOG_SMOOTH | USE_FOG USE_FOG_EXP | USE_FOG USE_FOG_EXP2
+choose | USE_FRAGMENT_DISCARD
+
+shader block_layer_opaque.frag
+always VERT_POS_SCALE=1.0 VERT_POS_OFFSET=0.0 VERT_TEX_SCALE=1.0
+choose | USE_FOG USE_FOG_SMOOTH | USE_FOG USE_FOG_EXP | USE_FOG USE_FOG_EXP2
+choose | USE_FRAGMENT_DISCARD
+choose | UPSTREAM_FOG

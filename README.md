@@ -29,7 +29,24 @@ gradlew build
 ```
 
 The jar lands in `build/libs/`. Gradle downloads the JDK 25 toolchain if it isn't installed. `gradlew publishToMavenLocal`
-puts the jar where Hestia's build looks for it.
+puts the jar where Hestia's build looks for it. The build compiles the Vulkan shaders (below) with LWJGL's shaderc binding
+3.4.3 (BSD-3-Clause; shaderc, glslang and SPIRV-Tools inside it are Apache-2.0, glslang partly BSD-3-Clause), which
+Gradle fetches from Maven Central; it runs only at build time and isn't in the jar.
+
+## Vulkan shaders
+
+Hestia's Vulkan renderer runs Celeritas's GL calls on Vulkan: its buffers, vertex arrays and draws unchanged, its GLSL
+programs as Vulkan versions of the same shaders that this jar carries (2026-10-18, branch `vulkan`). In
+`src/main/vulkan`, `block_layer_opaque.vert` and `.frag` are celeritas-common's `blocks/block_layer_opaque.vsh` and
+`.fsh` with their includes, ported to GLSL 450 for Vulkan: the same math (with the fog change below), explicit
+locations, the uniforms in a uniform block and push constants at fixed offsets, the samplers as bindless slots, and GL's
+alpha test (which the compatibility profile applies after a fragment shader) as a specialization constant. The build
+compiles every variant `variants.txt` lists (the defines the 1.8.9 module's passes produce) into the jar's
+`assets/celeritas/vulkan/` with `spirv.txt`, its index; `programs.txt` there says which GL shader each version stands
+for (the SHA-256 of the GL source as ShaderLoader builds it, without the defines ShaderParser adds) and where its
+uniforms and attributes are. A change to celeritas-common's shaders or to `ShaderLoaderMixin` changes the hash: the
+renderer then reports the shader and draws no terrain until the port and the hash are updated. Nothing here runs in GL
+mode, where the jar behaves exactly as before.
 
 ## Changes from upstream
 
