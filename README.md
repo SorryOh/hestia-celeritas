@@ -152,6 +152,13 @@ every change. In short (2026-10-12):
   added or removed (`updateSectionInfo`, on the render thread before the terrain draws). Hestia uses both to leave out
   sections wholly behind the depth of an earlier frame while the GPU is the slower side, trusting that depth nowhere a
   section changed since it was drawn.
+- **Chunk builds for other mods** (`org.taumc.celeritas.api.ChunkBuilds`, 2026-10-21, build 9): `pending()` says whether
+  the terrain the camera sees is still being worked on: a visibility search due or not yet joined, sections asking for
+  an update since the last search, the last search's rebuild lists not drained (or overflowed), builds queued or
+  running, or finished builds not uploaded (two accessors, `RenderListManagerAccessor` and
+  `RenderSectionManagerAccessor`, read celeritas-common's private fields). It allocates nothing. Hestia's video export
+  holds the camera on a frame's moment until nothing is pending before and after it draws, so every frame shows every
+  section built.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
