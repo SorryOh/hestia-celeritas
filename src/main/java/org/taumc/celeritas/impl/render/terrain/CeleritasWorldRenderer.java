@@ -2,7 +2,8 @@ package org.taumc.celeritas.impl.render.terrain;
 
 // Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. Block entities are drawn with a reused context
 // object instead of a boxed Float per frame; -Dceleritas.enableGLDebug=true installs OpenGL's debug output; no sprite
-// transparency tracker or sky-light section count (pre-1.8 only).
+// transparency tracker or sky-light section count (pre-1.8 only). Hestia build 9 (2026-10-21): whether build work is
+// pending, for ChunkBuilds.
 
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.Minecraft;
@@ -85,6 +86,12 @@ public class CeleritasWorldRenderer extends SimpleWorldRenderer<World, Primitive
         float fogDistance = GLStateManagerFogService.INSTANCE.getFogCutoff();
 
         return new CameraState(x, y, z, pitch, yaw, fogDistance);
+    }
+
+    /** ChunkBuilds.pending(): the section manager's answer, false before it exists. */
+    public boolean isBuildWorkPending() {
+        PrimitiveRenderSectionManager manager = this.renderSectionManager;
+        return manager != null && manager.isBuildWorkPending();
     }
 
     public int renderBlockEntities(float partialTicks) {

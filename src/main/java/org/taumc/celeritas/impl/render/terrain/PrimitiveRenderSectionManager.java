@@ -9,6 +9,7 @@ package org.taumc.celeritas.impl.render.terrain;
 // animated sprites (VisibleSectionSpriteTicker), as Celeritas's 1.12.2 version marks them for its animation filter.
 // Hestia build 8 (2026-10-14): the chunk renderer draws without the sections SectionOcclusion's test reports hidden;
 // every change of a section's geometry is reported to SectionOcclusion's listener.
+// Hestia build 9 (2026-10-21): whether build work is pending (ChunkBuilds), read without allocating.
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -21,11 +22,15 @@ import org.embeddedt.embeddium.impl.render.chunk.DefaultChunkRenderer;
 import org.embeddedt.embeddium.impl.render.chunk.RenderPassConfiguration;
 import org.embeddedt.embeddium.impl.render.chunk.RenderSection;
 import org.embeddedt.embeddium.impl.render.chunk.RenderSectionManager;
+import org.embeddedt.embeddium.impl.render.chunk.ChunkUpdateType;
 import org.embeddedt.embeddium.impl.render.chunk.compile.ChunkBuildOutput;
+import org.embeddedt.embeddium.impl.render.chunk.compile.executor.ChunkBuilder;
 import org.embeddedt.embeddium.impl.render.chunk.compile.tasks.ChunkBuilderTask;
 import org.embeddedt.embeddium.impl.render.chunk.data.BuiltRenderSectionData;
 import org.embeddedt.embeddium.impl.render.chunk.fog.FogService;
+import org.embeddedt.embeddium.impl.render.chunk.lists.ChunkRebuildLists;
 import org.embeddedt.embeddium.impl.render.chunk.lists.ChunkRenderListIterable;
+import org.embeddedt.embeddium.impl.render.chunk.lists.RenderListManager;
 import org.embeddedt.embeddium.impl.render.chunk.lists.SectionTicker;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderInterface;
@@ -43,8 +48,13 @@ import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
 import org.taumc.celeritas.impl.world.WorldSlice;
 import org.taumc.celeritas.impl.world.cloned.ChunkRenderContext;
 import org.taumc.celeritas.impl.world.cloned.ClonedChunkSectionCache;
+import org.taumc.celeritas.mixin.core.RenderListManagerAccessor;
+import org.taumc.celeritas.mixin.core.RenderSectionManagerAccessor;
 
+import java.util.ArrayDeque;
 import java.util.Collection;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public class PrimitiveRenderSectionManager extends RenderSectionManager {
     private final World world;
@@ -201,6 +211,43 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
     public void updateChunks(boolean updateImmediately) {
         this.sectionCache.cleanup();
         super.updateChunks(updateImmediately);
+    }
+
+    /**
+     * ChunkBuilds.pending(): a visibility search due or still running (it's joined at the next frame's start), sections
+     * asking for an update since the last search, the last search's rebuild lists not drained (or overflowed), builds
+     * queued or running, or results not uploaded yet. Render thread; no iterator or other allocation.
+     */
+    public boolean isBuildWorkPending() {
+        RenderListManager lists = this.renderListManager;
+        if (lists.isNeedsUpdate()) {
+            return true;
+        }
+        CompletableFuture<?> search = ((RenderListManagerAccessor) lists).celeritas$getCurrentOcclusionFuture();
+        if (search != null) {
+            return true;
+        }
+        if (!this.sectionsRequestingUpdate.isEmpty()) {
+            return true;
+        }
+        ChunkRebuildLists rebuilds = lists.getRebuildLists();
+        if (rebuilds != null) {
+            if (rebuilds.hasAdditionalUpdates()) {
+                return true;
+            }
+            Map<ChunkUpdateType, ArrayDeque<RenderSection>> byType = rebuilds.byUpdateType();
+            for (ChunkUpdateType type : ChunkUpdateType.VALUES) {
+                ArrayDeque<RenderSection> queue = byType.get(type);
+                if (queue != null && !queue.isEmpty()) {
+                    return true;
+                }
+            }
+        }
+        ChunkBuilder builder = this.getBuilder();
+        if (!builder.isBuildQueueEmpty() || builder.getBusyThreadCount() > 0) {
+            return true;
+        }
+        return !((RenderSectionManagerAccessor) this).celeritas$getBuildResults().isEmpty();
     }
 
     @Override
