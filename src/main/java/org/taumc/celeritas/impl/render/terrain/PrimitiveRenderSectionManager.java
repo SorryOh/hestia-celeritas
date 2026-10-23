@@ -10,6 +10,7 @@ package org.taumc.celeritas.impl.render.terrain;
 // Hestia build 8 (2026-10-14): the chunk renderer draws without the sections SectionOcclusion's test reports hidden;
 // every change of a section's geometry is reported to SectionOcclusion's listener.
 // Hestia build 9 (2026-10-21): whether build work is pending (ChunkBuilds), read without allocating.
+// Hestia build 10 (2026-10-23): the search distance kept for the chunk tracker's window (ViewChunkTracker).
 
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -66,18 +67,22 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
 
     private final boolean drawFoggedChunks;
 
+    /** How far the section search reaches, in chunks: every column this close to the camera has sections. */
+    public final int searchDistance;
+
     public PrimitiveRenderSectionManager(RenderPassConfiguration<?> configuration, World world, int renderDistance, CommandList commandList, int minSection, int maxSection, int requestedThreads, boolean drawFoggedChunks) {
         super(configuration, () -> new PrimitiveChunkBuildContext(world, configuration), ChunkRenderer::new, renderDistance, commandList, minSection, maxSection, requestedThreads, false);
         this.world = world;
         this.sectionCache = new ClonedChunkSectionCache(world);
         this.drawFoggedChunks = drawFoggedChunks;
+        this.searchDistance = renderDistance;
     }
 
     public static PrimitiveRenderSectionManager create(ChunkVertexType vertexType, World world, int renderDistance, CommandList commandList) {
         int maxSection = world.getHeight() / 16;
         boolean drawFoggedChunks = CeleritasSettings.drawFoggedChunks;
         // The section search is a circle; vanilla draws the whole square of loaded chunks, whose corners lie up to
-        // sqrt(2) times as far. Only the search uses this distance: sections exist only for loaded chunks.
+        // sqrt(2) times as far. The search and the chunk tracker's window (ViewChunkTracker) use this distance.
         int searchDistance = drawFoggedChunks ? (int) Math.ceil(renderDistance * Math.sqrt(2.0)) : renderDistance;
         return new PrimitiveRenderSectionManager(PrimitiveRenderPassConfigurationBuilder.build(vertexType), world, searchDistance, commandList,
                 0, maxSection,

@@ -142,6 +142,16 @@ every change. In short (2026-10-12):
   `RenderSectionManagerAccessor`, read celeritas-common's private fields). It allocates nothing. Hestia's video export
   holds the camera on a frame's moment until nothing is pending before and after it draws, so every frame shows every
   section built.
+- **Which chunks get sections, as vanilla 1.8.9** (`ViewChunkTracker`, 2026-10-23, build 10): upstream's chunk tracker
+  makes a column ready only when it and its eight neighbours are loaded (Sodium's rule, for chunks still being lit and
+  decorated). A 1.8.9 client builds any loaded chunk, reading a missing neighbour as air, and 1.8's protocol unloads a
+  column when a chunk packet has no sections (an all-air column sent on its own), so around minigame arenas' void the
+  columns next to such a neighbour never got sections and stayed undrawn, at random. Here a loaded column is ready by
+  itself. The visibility search only passes through sections that exist, where vanilla's view grid always has render
+  chunks, so every column within the search's reach of the camera (one more for the third-person camera) also has
+  sections while unloaded: visually empty ones, built when the column loads (the chunk packet's own rebuild of its
+  area). An unloaded neighbour's biomes in a rebuild are the world's answer for unloaded places (the biome source,
+  plains as default), as vanilla's region asks.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a

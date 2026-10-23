@@ -3,6 +3,8 @@ package org.taumc.celeritas.impl.world.cloned;
 // Hestia build (2026-10-12): written for 1.8.9 after Celeritas's 1.12.2 version, which keeps references to the live
 // section and its light arrays. A 1.8.9 section is small (a char per block and two 2 KiB light arrays), so this one
 // copies them: builder threads never read data the main thread may be changing.
+// Hestia build 10 (2026-10-23): an unloaded neighbour's biomes are the world's answer for unloaded places (rebuilds now
+// run next to unloaded columns).
 
 import it.unimi.dsi.fastutil.shorts.Short2ReferenceMap;
 import it.unimi.dsi.fastutil.shorts.Short2ReferenceOpenHashMap;
@@ -142,8 +144,12 @@ public final class ClonedChunkSection {
     private static byte[] copyBiomeIds(World world, WorldChunk chunk, int originX, int originY, int originZ) {
         byte[] ids = chunk.getBiomes().clone();
         if (chunk instanceof EmptyChunk) {
-            // An unloaded chunk (shared by all of them) has no biomes; 255 reads as plains. Vanilla's region would ask
-            // the client's biome generator here, but rebuilds only run while all neighbouring chunks are loaded.
+            // An unloaded chunk (shared by all of them) has no biomes, and its getBiome would store them in the shared
+            // array: World.getBiome's answer for an unloaded place instead, the biome source's with plains as default.
+            BlockPos.Mutable pos = new BlockPos.Mutable();
+            for (int i = 0; i < ids.length; i++) {
+                ids[i] = (byte) world.dimension.getBiomeSource().getBiome(pos.set(originX + (i & 15), originY, originZ + (i >> 4)), Biome.PLAINS).id;
+            }
             return ids;
         }
         for (int i = 0; i < ids.length; i++) {
