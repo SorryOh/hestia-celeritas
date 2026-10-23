@@ -3,6 +3,7 @@ package org.taumc.celeritas.mixin.core;
 // Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. setupRender uses the spectator flag vanilla passes;
 // markDirty keeps vanilla's private access and ignores updates before a world is loaded; the entity loop reuses its
 // BlockPos and reads the camera entity once per frame instead of once per entity.
+// Hestia build 10 (2026-10-23): setupRender moves the chunk tracker's window to the camera's column first.
 
 import com.llamalad7.mixinextras.sugar.Local;
 import net.minecraft.client.Minecraft;
@@ -18,6 +19,7 @@ import net.minecraft.entity.projectile.WitherSkullEntity;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.MathHelper;
 import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
+import org.embeddedt.embeddium.impl.render.chunk.map.ChunkTrackerHolder;
 import org.embeddedt.embeddium.impl.render.viewport.ViewportProvider;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -30,6 +32,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.taumc.celeritas.impl.extensions.RenderGlobalExtension;
 import org.taumc.celeritas.impl.render.entity.EntityGatherer;
 import org.taumc.celeritas.impl.render.terrain.CeleritasWorldRenderer;
+import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderSectionManager;
+import org.taumc.celeritas.impl.world.ViewChunkTracker;
 
 import java.util.List;
 
@@ -124,6 +128,14 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
     public void setupRender(Entity camera, double tickDelta, Culler culler, int frame, boolean spectator) {
         if (this.minecraft.options.viewDistance != this.lastViewDistance) {
             this.reload();
+        }
+
+        // Hestia build 10: the columns the search can reach have sections, loaded or not (ViewChunkTracker). The window
+        // is centred on the camera entity's column; one more column covers the third-person camera's distance.
+        if (this.world != null && this.renderer.getRenderSectionManager() instanceof PrimitiveRenderSectionManager manager) {
+            int cx = MathHelper.floor(camera.prevX + (camera.x - camera.prevX) * tickDelta) >> 4;
+            int cz = MathHelper.floor(camera.prevZ + (camera.z - camera.prevZ) * tickDelta) >> 4;
+            ((ViewChunkTracker) ChunkTrackerHolder.get(this.world)).moveWindow(cx, cz, manager.searchDistance + 1);
         }
 
         RenderDevice.enterManagedCode();
