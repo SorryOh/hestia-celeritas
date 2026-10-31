@@ -11,13 +11,16 @@ package org.taumc.celeritas.impl.render.terrain;
 // every change of a section's geometry is reported to SectionOcclusion's listener.
 // Hestia build 9 (2026-10-21): whether build work is pending (ChunkBuilds), read without allocating.
 // Hestia build 10 (2026-10-23): the search distance kept for the chunk tracker's window (ViewChunkTracker).
+// Hestia build 11 (2026-11-01): another mod's programs draw the passes it gives one for (TerrainPrograms).
 
+import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 import net.minecraft.world.chunk.WorldChunk;
 import net.minecraft.world.chunk.WorldChunkSection;
 import org.embeddedt.embeddium.impl.gl.device.CommandList;
 import org.embeddedt.embeddium.impl.gl.device.RenderDevice;
+import org.embeddedt.embeddium.impl.gl.shader.GlProgram;
 import org.embeddedt.embeddium.impl.render.chunk.ChunkRenderMatrices;
 import org.embeddedt.embeddium.impl.render.chunk.DefaultChunkRenderer;
 import org.embeddedt.embeddium.impl.render.chunk.RenderPassConfiguration;
@@ -35,14 +38,18 @@ import org.embeddedt.embeddium.impl.render.chunk.lists.RenderListManager;
 import org.embeddedt.embeddium.impl.render.chunk.lists.SectionTicker;
 import org.embeddedt.embeddium.impl.render.chunk.occlusion.AsyncOcclusionMode;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderInterface;
+import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderOptions;
 import org.embeddedt.embeddium.impl.render.chunk.shader.ChunkShaderTextureSlot;
 import org.embeddedt.embeddium.impl.render.chunk.terrain.TerrainRenderPass;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexType;
 import org.embeddedt.embeddium.impl.render.viewport.CameraTransform;
 import org.embeddedt.embeddium.impl.render.viewport.Viewport;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.Nullable;
 import org.taumc.celeritas.api.CeleritasSettings;
 import org.taumc.celeritas.api.SectionOcclusion;
+import org.taumc.celeritas.api.TerrainPrograms;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.render.terrain.compile.task.ChunkBuilderMeshingTask;
 import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
@@ -295,5 +302,84 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
             }
             super.render(matrices, commandList, renderLists, pass, camera, previousCamera);
         }
+
+        // Another mod's programs (TerrainPrograms) draw the passes it gives one for; asked for once per pass after each
+        // change of its generation, and kept here by pass (null: Celeritas's own for that pass).
+        private final Map<TerrainRenderPass, PackChunkProgram> packPrograms = new Reference2ReferenceOpenHashMap<>();
+        private int packGeneration = -1;
+        private PackChunkProgram activePack;
+        private TerrainPrograms.Provider activeProvider;
+
+        @Override
+        protected GlProgram<ChunkShaderInterface> compileProgram(ChunkShaderOptions options) {
+            TerrainPrograms.Provider provider = TerrainPrograms.getProvider();
+            if (provider != null) {
+                PackChunkProgram pack = this.packProgram(provider, options.pass());
+                if (pack != null) {
+                    return pack;
+                }
+            }
+            return super.compileProgram(options);
+        }
+
+        private PackChunkProgram packProgram(TerrainPrograms.Provider provider, TerrainRenderPass pass) {
+            int generation = TerrainPrograms.generation();
+            if (generation != this.packGeneration) {
+                this.packGeneration = generation;
+                this.dropPackPrograms();
+            }
+            PackChunkProgram program = this.packPrograms.get(pass);
+            if (program == null && !this.packPrograms.containsKey(pass)) {
+                int handle = 0;
+                try {
+                    handle = provider.program(pass.name());
+                } catch (RuntimeException e) {
+                    LOGGER.error("The terrain program provider failed for the {} pass; Celeritas's own program draws it", pass.name(), e);
+                }
+                program = handle != 0 ? new PackChunkProgram(handle) : null;
+                this.packPrograms.put(pass, program);
+            }
+            return program;
+        }
+
+        private void dropPackPrograms() {
+            for (PackChunkProgram program : this.packPrograms.values()) {
+                if (program != null) {
+                    program.delete();
+                }
+            }
+            this.packPrograms.clear();
+        }
+
+        @Override
+        protected void begin(TerrainRenderPass pass) {
+            super.begin(pass);
+            TerrainPrograms.Provider provider = TerrainPrograms.getProvider();
+            if (provider != null && this.activeProgram instanceof PackChunkProgram pack) {
+                this.activePack = pack;
+                this.activeProvider = provider;
+                provider.begin(pass.name(), pack.handle());
+            }
+        }
+
+        @Override
+        protected void end(TerrainRenderPass pass) {
+            PackChunkProgram pack = this.activePack;
+            if (pack != null) {
+                this.activePack = null;
+                TerrainPrograms.Provider provider = this.activeProvider;
+                this.activeProvider = null;
+                provider.end(pass.name(), pack.handle());
+            }
+            super.end(pass);
+        }
+
+        @Override
+        public void delete(CommandList commandList) {
+            this.dropPackPrograms();
+            super.delete(commandList);
+        }
     }
+
+    private static final Logger LOGGER = LogManager.getLogger("Celeritas");
 }

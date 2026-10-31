@@ -152,6 +152,17 @@ every change. In short (2026-10-12):
   sections while unloaded: visually empty ones, built when the column loads (the chunk packet's own rebuild of its
   area). An unloaded neighbour's biomes in a rebuild are the world's answer for unloaded places (the biome source,
   plains as default), as vanilla's region asks.
+- **Terrain programs for other mods** (`org.taumc.celeritas.api.TerrainPrograms`, 2026-11-01, build 11): a provider
+  another mod sets may give a linked GL program per terrain pass, which the chunk renderer binds and draws with in
+  place of its own (`PackChunkProgram`, a `GlProgram` whose GL program stays the provider's): the same region buffers,
+  vertex format (`attributes()` names its attributes in index order), draw lists and state, with `u_ModelViewMatrix`,
+  `u_ProjectionMatrix` and `u_RegionOffset` set where the program declares them. The provider hears when each pass's
+  draws start and end, to set the rest of its program's state; `reload()` makes every pass ask again. With no provider
+  nothing changes. `setVanillaLayers(true)` (applied when the world renderer is made again) draws terrain in vanilla's
+  four block layers, each when vanilla draws it and in the state vanilla sets for it: the cutout_mipped pass at the
+  cutout_mipped layer (alpha test on) and a cutout pass at the cutout layer (the block atlas without mipmaps), whose
+  blocks' quads stay in it. Kora uses both for shader packs, whose terrain programs expect vanilla's layers and read
+  this format through Kora's patcher.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
