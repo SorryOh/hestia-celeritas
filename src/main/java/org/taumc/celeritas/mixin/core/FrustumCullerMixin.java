@@ -2,6 +2,7 @@ package org.taumc.celeritas.mixin.core;
 
 // Hestia build (2026-10-12): the search gets a copy of vanilla's planes with the eye offset (CameraFrustum), and the
 // matrix and vectors are reused instead of allocated every frame.
+// Hestia build 12 (2026-11-01): three copies in turn, as a shadow pass (TerrainShadow) makes a second viewport a frame.
 
 import net.minecraft.client.render.FrustumCuller;
 import net.minecraft.client.render.FrustumData;
@@ -34,9 +35,10 @@ public class FrustumCullerMixin implements ViewportProvider {
     private static final Vector3f celeritas$eyeOffset = new Vector3f();
     @Unique
     private static final Vector3d celeritas$eyePosition = new Vector3d();
-    // Used in turn: last frame's copy may still be read by the search thread until this frame's setup joins it.
+    // Used in turn: last frame's copy may still be read by the search thread until this frame's setup joins it. With a
+    // shadow pass two are made a frame, the first one before that join (TerrainShadow.setup), hence three.
     @Unique
-    private static final CameraFrustum[] celeritas$frustums = { new CameraFrustum(), new CameraFrustum() };
+    private static final CameraFrustum[] celeritas$frustums = { new CameraFrustum(), new CameraFrustum(), new CameraFrustum() };
     @Unique
     private static int celeritas$nextFrustum;
 
@@ -46,7 +48,7 @@ public class FrustumCullerMixin implements ViewportProvider {
         modelMatrix.invert();
         Vector3f offset = modelMatrix.transformPosition(celeritas$eyeOffset.zero());
         CameraFrustum cullTester = celeritas$frustums[celeritas$nextFrustum].set(this.frustum.frustum, offset.x, offset.y, offset.z);
-        celeritas$nextFrustum ^= 1;
+        celeritas$nextFrustum = (celeritas$nextFrustum + 1) % 3;
         return new Viewport(cullTester,
                 celeritas$eyePosition.set(this.offsetX + offset.x, this.offsetY + offset.y, this.offsetZ + offset.z));
     }

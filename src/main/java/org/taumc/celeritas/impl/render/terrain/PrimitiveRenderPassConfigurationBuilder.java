@@ -6,6 +6,8 @@ package org.taumc.celeritas.impl.render.terrain;
 // blocks, and the configuration's default solid material is the solid one (upstream passed cutout_mipped).
 // Hestia build 11 (2026-11-01): vanilla's four block layers as passes (TerrainPrograms.setVanillaLayers): cutout_mipped
 // at vanilla's cutout_mipped layer and a cutout pass at its cutout layer, for shader packs.
+// Hestia build 12 (2026-11-01): the passes and materials exist once per vertex format (Celeritas's own and the pack
+// format, TerrainPrograms.setPackFormat), since a pass names the format its buffers hold; build() takes the format.
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.client.render.block.BlockLayer;
@@ -24,17 +26,68 @@ import java.util.List;
 import java.util.Map;
 
 public class PrimitiveRenderPassConfigurationBuilder {
-    public static final TerrainRenderPass SOLID_PASS, CUTOUT_MIPPED_PASS, TRANSLUCENT_PASS;
-    public static final Material SOLID_MATERIAL, CUTOUT_MATERIAL, CUTOUT_MIPPED_MATERIAL, TRANSLUCENT_MATERIAL;
-    /** The solid pass sampled without mipmaps, as vanilla draws the cutout layer: for cutout quads with opaque sprites. */
-    public static final Material SOLID_UNMIPPED_MATERIAL;
-    /** Vanilla's cutout layer as a pass of its own, only in vanilla's layers (TerrainPrograms.setVanillaLayers). */
-    public static final TerrainRenderPass CUTOUT_PASS;
-    /**
-     * The cutout layer's blocks in vanilla's layers, drawn when vanilla draws that layer (the block atlas without
-     * mipmaps); not the material the opaque-quad move looks for, so their quads all stay in that pass.
-     */
-    public static final Material LAYER_CUTOUT_MATERIAL;
+    /** One vertex format's passes and materials. */
+    public static final class Passes {
+        public final ChunkVertexType vertexType;
+        public final TerrainRenderPass solidPass, cutoutMippedPass, translucentPass;
+        /** Vanilla's cutout layer as a pass of its own, only in vanilla's layers (TerrainPrograms.setVanillaLayers). */
+        public final TerrainRenderPass cutoutPass;
+        public final Material solidMaterial, cutoutMaterial, cutoutMippedMaterial, translucentMaterial;
+        /** The solid pass sampled without mipmaps, as vanilla draws the cutout layer: for cutout quads with opaque sprites. */
+        public final Material solidUnmippedMaterial;
+        /**
+         * The cutout layer's blocks in vanilla's layers, drawn when vanilla draws that layer (the block atlas without
+         * mipmaps); not the material the opaque-quad move looks for, so their quads all stay in that pass.
+         */
+        public final Material layerCutoutMaterial;
+
+        private Passes(ChunkVertexType vertexType) {
+            this.vertexType = vertexType;
+            this.solidPass = builderForRenderType(vertexType, true)
+                    .name("solid")
+                    .fragmentDiscard(false)
+                    .useReverseOrder(false)
+                    .build();
+            this.cutoutMippedPass = builderForRenderType(vertexType, false)
+                    .name("cutout_mipped")
+                    .fragmentDiscard(true)
+                    .useReverseOrder(false)
+                    .build();
+            this.translucentPass = builderForRenderType(vertexType, false)
+                    .name("translucent")
+                    .fragmentDiscard(false)
+                    .useReverseOrder(true)
+                    .useTranslucencySorting(true) // TODO allow disabling
+                    .build();
+            this.cutoutPass = builderForRenderType(vertexType, false)
+                    .name("cutout")
+                    .fragmentDiscard(true)
+                    .useReverseOrder(false)
+                    .build();
+
+            this.translucentMaterial = new Material(this.translucentPass, AlphaCutoffParameter.ZERO, true);
+            this.solidMaterial = new Material(this.solidPass, AlphaCutoffParameter.ZERO, true);
+            this.solidUnmippedMaterial = new Material(this.solidPass, AlphaCutoffParameter.ZERO, false);
+            this.cutoutMippedMaterial = new Material(this.cutoutMippedPass, AlphaCutoffParameter.ONE_TENTH, true);
+            this.cutoutMaterial = new Material(this.cutoutMippedPass, AlphaCutoffParameter.ONE_TENTH, false);
+            this.layerCutoutMaterial = new Material(this.cutoutPass, AlphaCutoffParameter.ONE_TENTH, false);
+        }
+    }
+
+    /** Celeritas's own format's passes, and the pack format's. */
+    public static final Passes VANILLA_LIKE = new Passes(ChunkMeshFormats.VANILLA_LIKE);
+    public static final Passes PACK = new Passes(PackChunkVertex.INSTANCE);
+
+    // Celeritas's own format's, under build 11's names.
+    public static final TerrainRenderPass SOLID_PASS = VANILLA_LIKE.solidPass;
+    public static final TerrainRenderPass CUTOUT_MIPPED_PASS = VANILLA_LIKE.cutoutMippedPass;
+    public static final TerrainRenderPass TRANSLUCENT_PASS = VANILLA_LIKE.translucentPass;
+    public static final TerrainRenderPass CUTOUT_PASS = VANILLA_LIKE.cutoutPass;
+
+    /** The passes a material belongs to (by its pass's vertex format). */
+    public static Passes of(Material material) {
+        return material.pass.vertexType() == PackChunkVertex.INSTANCE ? PACK : VANILLA_LIKE;
+    }
 
     private static final class PrimitivePipelineState implements TerrainRenderPass.PipelineState {
         private final boolean disableAlphaTest;
@@ -60,66 +113,36 @@ public class PrimitiveRenderPassConfigurationBuilder {
         }
     }
 
-    private static TerrainRenderPass.TerrainRenderPassBuilder builderForRenderType(boolean disableAlphaTest) {
+    private static TerrainRenderPass.TerrainRenderPassBuilder builderForRenderType(ChunkVertexType vertexType, boolean disableAlphaTest) {
         var builder = TerrainRenderPass.builder();
         builder.pipelineState(new PrimitivePipelineState(disableAlphaTest));
-        builder.vertexType(ChunkMeshFormats.VANILLA_LIKE).primitiveType(QuadPrimitiveType.TRIANGULATED);
+        builder.vertexType(vertexType).primitiveType(QuadPrimitiveType.TRIANGULATED);
         return builder;
     }
 
-    static {
-        SOLID_PASS = builderForRenderType(true)
-                .name("solid")
-                .fragmentDiscard(false)
-                .useReverseOrder(false)
-                .build();
-        CUTOUT_MIPPED_PASS = builderForRenderType(false)
-                .name("cutout_mipped")
-                .fragmentDiscard(true)
-                .useReverseOrder(false)
-                .build();
-        TRANSLUCENT_PASS = builderForRenderType(false)
-                .name("translucent")
-                .fragmentDiscard(false)
-                .useReverseOrder(true)
-                .useTranslucencySorting(true) // TODO allow disabling
-                .build();
-        CUTOUT_PASS = builderForRenderType(false)
-                .name("cutout")
-                .fragmentDiscard(true)
-                .useReverseOrder(false)
-                .build();
-
-        TRANSLUCENT_MATERIAL = new Material(TRANSLUCENT_PASS, AlphaCutoffParameter.ZERO, true);
-        SOLID_MATERIAL = new Material(SOLID_PASS, AlphaCutoffParameter.ZERO, true);
-        SOLID_UNMIPPED_MATERIAL = new Material(SOLID_PASS, AlphaCutoffParameter.ZERO, false);
-        CUTOUT_MIPPED_MATERIAL = new Material(CUTOUT_MIPPED_PASS, AlphaCutoffParameter.ONE_TENTH, true);
-        CUTOUT_MATERIAL = new Material(CUTOUT_MIPPED_PASS, AlphaCutoffParameter.ONE_TENTH, false);
-        LAYER_CUTOUT_MATERIAL = new Material(CUTOUT_PASS, AlphaCutoffParameter.ONE_TENTH, false);
-    }
-
     public static RenderPassConfiguration<?> build(ChunkVertexType vertexType) {
+        Passes p = vertexType == PackChunkVertex.INSTANCE ? PACK : VANILLA_LIKE;
         boolean layers = TerrainPrograms.vanillaLayers();
         Map<BlockLayer, Collection<TerrainRenderPass>> vanillaRenderStages = new Reference2ReferenceOpenHashMap<>();
         if (layers) {
-            vanillaRenderStages.put(BlockLayer.SOLID, List.of(SOLID_PASS));
-            vanillaRenderStages.put(BlockLayer.CUTOUT_MIPPED, List.of(CUTOUT_MIPPED_PASS));
-            vanillaRenderStages.put(BlockLayer.CUTOUT, List.of(CUTOUT_PASS));
+            vanillaRenderStages.put(BlockLayer.SOLID, List.of(p.solidPass));
+            vanillaRenderStages.put(BlockLayer.CUTOUT_MIPPED, List.of(p.cutoutMippedPass));
+            vanillaRenderStages.put(BlockLayer.CUTOUT, List.of(p.cutoutPass));
         } else {
-            vanillaRenderStages.put(BlockLayer.SOLID, List.of(SOLID_PASS, CUTOUT_MIPPED_PASS));
+            vanillaRenderStages.put(BlockLayer.SOLID, List.of(p.solidPass, p.cutoutMippedPass));
         }
-        vanillaRenderStages.put(BlockLayer.TRANSLUCENT, List.of(TRANSLUCENT_PASS));
+        vanillaRenderStages.put(BlockLayer.TRANSLUCENT, List.of(p.translucentPass));
 
         Map<BlockLayer, Material> renderTypeToMaterialMap = new Reference2ReferenceOpenHashMap<>();
-        renderTypeToMaterialMap.put(BlockLayer.SOLID, SOLID_MATERIAL);
-        renderTypeToMaterialMap.put(BlockLayer.CUTOUT, layers ? LAYER_CUTOUT_MATERIAL : CUTOUT_MATERIAL);
-        renderTypeToMaterialMap.put(BlockLayer.CUTOUT_MIPPED, CUTOUT_MIPPED_MATERIAL);
-        renderTypeToMaterialMap.put(BlockLayer.TRANSLUCENT, TRANSLUCENT_MATERIAL);
+        renderTypeToMaterialMap.put(BlockLayer.SOLID, p.solidMaterial);
+        renderTypeToMaterialMap.put(BlockLayer.CUTOUT, layers ? p.layerCutoutMaterial : p.cutoutMaterial);
+        renderTypeToMaterialMap.put(BlockLayer.CUTOUT_MIPPED, p.cutoutMippedMaterial);
+        renderTypeToMaterialMap.put(BlockLayer.TRANSLUCENT, p.translucentMaterial);
 
         return new RenderPassConfiguration<>(renderTypeToMaterialMap,
                 vanillaRenderStages,
-                SOLID_MATERIAL,
-                CUTOUT_MIPPED_MATERIAL,
-                TRANSLUCENT_MATERIAL);
+                p.solidMaterial,
+                p.cutoutMippedMaterial,
+                p.translucentMaterial);
     }
 }
