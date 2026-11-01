@@ -193,7 +193,8 @@ every change. In short (2026-10-12):
     and `TerrainShadow` drives it: `setup` (the shadow camera's frustum planes, the camera's frustum for the camera's own
     search; both start there, so vanilla's terrain setup then only uploads and draws), `draw` (a block layer from the
     shadow lists with the shadow camera's matrices and the provider's "shadow_" programs, no SectionOcclusion test, no
-    pass drawn without a program) and `drawBlockEntities`. The shadow search uses no occlusion culling, and its
+    block face culling (its batches keep the regions' second cache slot), no pass drawn without a program) and
+    `drawBlockEntities`. The shadow search uses no occlusion culling, and its
     sections' rebuilds are scheduled like the camera's.
   - `TerrainPrograms.setFogCulling(false)` keeps sections the fog hides in the camera's search (packs draw their own
     fog); `ChunkBuilds.built()` counts uploaded section builds (Kora times the rebuild a format change causes).
