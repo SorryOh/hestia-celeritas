@@ -48,6 +48,7 @@ public final class TerrainPrograms {
     private static volatile boolean packFormat;
     private static volatile boolean shadowPass;
     private static volatile boolean fogCulling = true;
+    private static volatile boolean faceShade = true;
     private static volatile short[] blockIds;
 
     /** Sets the provider (null: Celeritas's own programs, at no cost); every pass asks it again. */
@@ -161,5 +162,20 @@ public final class TerrainPrograms {
 
     public static boolean fogCulling() {
         return fogCulling;
+    }
+
+    /**
+     * Whether pack-format terrain keeps the face shade 1.8.9 bakes into block models' vertex colors (FaceBakery: 0.5
+     * below, 0.8 north and south, 0.6 east and west, 1 above). Shader packs that light faces themselves turn it off
+     * (OptiFine's Old Lighting off, a pack's {@code oldLighting=false}): a quad's color is then its tint and ambient
+     * occlusion only. Celeritas's own format always keeps it. Takes effect for sections built afterwards: reload the
+     * chunks after changing it.
+     */
+    public static void setFaceShade(boolean on) {
+        faceShade = on;
+    }
+
+    public static boolean faceShade() {
+        return faceShade;
     }
 }

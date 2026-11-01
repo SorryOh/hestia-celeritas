@@ -6,6 +6,8 @@ package org.taumc.celeritas.impl.render.terrain.compile.pipeline;
 // replaces where the quads go: straight into Celeritas's buffers instead of a BufferBuilder copied afterwards.
 // Hestia build 12 (2026-11-01): in the pack format (TerrainPrograms.setPackFormat) each quad also gets the block's
 // mc_Entity, its middle texture coordinate and its tangent (PackVertex); the materials come from the section's format.
+// Hestia build 13 (2026-11-01): in the pack format, quads can start from white instead of their baked color
+// (TerrainPrograms.setFaceShade), leaving out FaceBakery's face shade for packs that shade faces themselves.
 
 import net.minecraft.block.Block;
 import net.minecraft.block.state.BlockState;
@@ -29,6 +31,7 @@ import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkVertexEncode
 import org.embeddedt.embeddium.impl.util.QuadUtil;
 import org.taumc.celeritas.api.BlockQuads;
 import org.taumc.celeritas.api.QuadSprites;
+import org.taumc.celeritas.api.TerrainPrograms;
 import org.taumc.celeritas.impl.extensions.BakedQuadExtension;
 import org.taumc.celeritas.impl.render.terrain.PackVertex;
 import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderPassConfigurationBuilder;
@@ -69,6 +72,9 @@ public class BlockModelPipeline {
     // The section's format's passes and materials, and whether that is the pack format (its quads carry PackVertex's).
     private PrimitiveRenderPassConfigurationBuilder.Passes passes = PrimitiveRenderPassConfigurationBuilder.VANILLA_LIKE;
     private boolean packFormat;
+    // Whether quads start from their baked color, which holds FaceBakery's face shade; off for shader packs that shade
+    // faces themselves (TerrainPrograms.setFaceShade): they start from white, as the shade is the baked color's only part.
+    private boolean bakedShade = true;
     /** The block being rendered's mc_Entity (PackVertex.entity), set by the meshing task in the pack format. */
     public int entity;
     // The section's animated sprites, for visible-only texture animation (VisibleSprites).
@@ -114,6 +120,7 @@ public class BlockModelPipeline {
         this.buffers = buffers;
         this.passes = PrimitiveRenderPassConfigurationBuilder.of(buffers.getRenderPassConfiguration().defaultSolidMaterial());
         this.packFormat = this.passes == PrimitiveRenderPassConfigurationBuilder.PACK;
+        this.bakedShade = !this.packFormat || TerrainPrograms.faceShade();
         this.entity = 0;
         this.animatedSprites = animatedSprites;
         this.offsetX = -originX;
@@ -237,11 +244,11 @@ public class BlockModelPipeline {
                 float green = (float) (tint >> 8 & 255) / 255.0F;
                 float blue = (float) (tint & 255) / 255.0F;
                 for (int v = 0; v < 4; v++) {
-                    this.colors[v] = multiplyColor(data[v * 7 + 3], shade[v] * red, shade[v] * green, shade[v] * blue);
+                    this.colors[v] = multiplyColor(this.baked(data, v), shade[v] * red, shade[v] * green, shade[v] * blue);
                 }
             } else {
                 for (int v = 0; v < 4; v++) {
-                    this.colors[v] = multiplyColor(data[v * 7 + 3], shade[v], shade[v], shade[v]);
+                    this.colors[v] = multiplyColor(this.baked(data, v), shade[v], shade[v], shade[v]);
                 }
             }
 
@@ -278,11 +285,11 @@ public class BlockModelPipeline {
                 float green = (float) (tint >> 8 & 255) / 255.0F;
                 float blue = (float) (tint & 255) / 255.0F;
                 for (int v = 0; v < 4; v++) {
-                    this.colors[v] = multiplyColor(data[v * 7 + 3], red, green, blue);
+                    this.colors[v] = multiplyColor(this.baked(data, v), red, green, blue);
                 }
             } else {
                 for (int v = 0; v < 4; v++) {
-                    this.colors[v] = data[v * 7 + 3];
+                    this.colors[v] = this.baked(data, v);
                 }
             }
 
@@ -391,10 +398,15 @@ public class BlockModelPipeline {
     private int handledColor(int v, int tint) {
         float shade = this.handledShade[v];
         if (tint < 0) {
-            return multiplyColor(this.handledData[v * 7 + 3], shade, shade, shade);
+            return multiplyColor(this.baked(this.handledData, v), shade, shade, shade);
         }
-        return multiplyColor(this.handledData[v * 7 + 3], shade * (float) (tint >> 16 & 255) / 255.0F,
+        return multiplyColor(this.baked(this.handledData, v), shade * (float) (tint >> 16 & 255) / 255.0F,
                 shade * (float) (tint >> 8 & 255) / 255.0F, shade * (float) (tint & 255) / 255.0F);
+    }
+
+    // Vertex v's baked color, or white when the section leaves out the face shade baked into it ([bakedShade]).
+    private int baked(int[] data, int v) {
+        return this.bakedShade ? data[v * 7 + 3] : 0xFFFFFFFF;
     }
 
     private void emitHandled(TextureAtlasSprite to, int rotation, boolean flip, int tint) {
