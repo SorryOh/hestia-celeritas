@@ -13,8 +13,8 @@ package org.taumc.celeritas.impl.render.terrain;
 // Hestia build 10 (2026-10-23): the search distance kept for the chunk tracker's window (ViewChunkTracker).
 // Hestia build 11 (2026-11-01): another mod's programs draw the passes it gives one for (TerrainPrograms).
 // Hestia build 12 (2026-11-01): celeritas-common's shadow pass when TerrainPrograms asks for one (TerrainShadow): its
-// search and lists while TerrainShadow works, the provider's "shadow_" programs, no SectionOcclusion test there; fog
-// culling as TerrainPrograms says; uploaded builds counted (ChunkBuilds.built).
+// search and lists while TerrainShadow works, the provider's "shadow_" programs, no SectionOcclusion test and no block
+// face culling there; fog culling as TerrainPrograms says; uploaded builds counted (ChunkBuilds.built).
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.util.math.BlockPos;
@@ -308,6 +308,15 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
         protected void configureShaderInterface(ChunkShaderInterface shader) {
             shader.setTextureSlot(ChunkShaderTextureSlot.BLOCK, 0);
             shader.setTextureSlot(ChunkShaderTextureSlot.LIGHT, 1);
+        }
+
+        // Block face culling leaves out the faces of a section that look away from the camera; the shadow pass looks
+        // from the sun, so it draws every face. That also gives its batches the other of the two cache slots each
+        // region keeps (they're keyed by this flag), so the camera's and the shadow's don't replace each other's
+        // every frame.
+        @Override
+        protected boolean useBlockFaceCulling() {
+            return !TerrainShadow.isActive() && super.useBlockFaceCulling();
         }
 
         // Another mod's section test (SectionOcclusion) leaves sections out of the camera's draws: the lists are
