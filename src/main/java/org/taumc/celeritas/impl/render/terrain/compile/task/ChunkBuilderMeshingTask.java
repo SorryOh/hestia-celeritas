@@ -11,8 +11,11 @@ package org.taumc.celeritas.impl.render.terrain.compile.task;
 // - Visibility comes from vanilla 1.8.9's own ChunkOcclusionGraph instead of upstream's copy of Minecraft 1.16's.
 // - The section lists the animated sprites it uses (block models' quads, fluids' still and flowing sprites), which the
 //   visible sections report every frame (VisibleSectionSpriteTicker); upstream's 1.8.9 branch listed none.
+// Hestia build 12 (2026-11-01): in the pack format each block's quads carry its mc_Entity (TerrainPrograms.setBlockIds,
+// else the block's numeric ID, and its render type).
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
+import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.material.Material;
@@ -39,6 +42,9 @@ import org.embeddedt.embeddium.impl.render.chunk.terrain.TerrainRenderPass;
 import org.embeddedt.embeddium.impl.util.task.CancellationToken;
 import org.joml.Vector3d;
 import org.lwjgl.opengl.GL11C;
+import org.taumc.celeritas.api.TerrainPrograms;
+import org.taumc.celeritas.impl.render.terrain.PackChunkVertex;
+import org.taumc.celeritas.impl.render.terrain.PackVertex;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.world.WorldSlice;
 import org.taumc.celeritas.impl.world.cloned.ChunkRenderContext;
@@ -97,6 +103,8 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
         tesselator.offset(-minX, -minY, -minZ);
         models.begin(buffers, renderData.animatedSprites, minX, minY, minZ);
+        boolean packFormat = passes.defaultSolidMaterial().pass.vertexType() == PackChunkVertex.INSTANCE;
+        short[] blockIds = packFormat ? TerrainPrograms.blockIds() : null;
 
         try {
             for (int y = minY; y < maxY; y++) {
@@ -130,8 +138,17 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
                         var material = passes.getMaterialForRenderType(block.getRenderLayer());
 
+                        int renderType = block.getRenderType();
+                        if (packFormat) {
+                            int state = Block.STATE_REGISTRY.getId(blockState);
+                            int id = blockIds != null && state >= 0 && state < blockIds.length ? blockIds[state] : Block.getId(block);
+                            int entity = PackVertex.entity(id, renderType);
+                            models.entity = entity;
+                            buildContext.entity = entity;
+                        }
+
                         // BlockRenderDispatcher.render's cases: 3 model, 1 fluid; the rest draw nothing here.
-                        switch (block.getRenderType()) {
+                        switch (renderType) {
                             case 3 -> models.render(slice, renderBlocks.getModel(blockState, slice, blockPos), blockState, blockPos, material);
                             case 1 -> {
                                 tesselator.begin(GL11C.GL_QUADS, DefaultVertexFormat.BLOCK);

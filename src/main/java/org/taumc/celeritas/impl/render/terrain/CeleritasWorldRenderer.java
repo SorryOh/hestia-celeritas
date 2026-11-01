@@ -3,7 +3,8 @@ package org.taumc.celeritas.impl.render.terrain;
 // Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. Block entities are drawn with a reused context
 // object instead of a boxed Float per frame; -Dceleritas.enableGLDebug=true installs OpenGL's debug output; no sprite
 // transparency tracker or sky-light section count (pre-1.8 only). Hestia build 9 (2026-10-21): whether build work is
-// pending, for ChunkBuilds.
+// pending, for ChunkBuilds. Hestia build 12 (2026-11-01): the vertex format TerrainPrograms asks for, the frame counter
+// kept here for TerrainShadow's search, and the shadow pass reported while TerrainShadow works.
 
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.Minecraft;
@@ -15,6 +16,8 @@ import org.embeddedt.embeddium.impl.gl.device.CommandList;
 import org.embeddedt.embeddium.impl.render.chunk.ChunkRenderMatrices;
 import org.embeddedt.embeddium.impl.render.chunk.vertex.format.ChunkMeshFormats;
 import org.embeddedt.embeddium.impl.render.terrain.SimpleWorldRenderer;
+import org.taumc.celeritas.api.TerrainPrograms;
+import org.taumc.celeritas.api.TerrainShadow;
 import org.taumc.celeritas.impl.extensions.RenderGlobalExtension;
 import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
 import org.taumc.celeritas.impl.render.terrain.matrix.PrimitiveChunkMatrixGetter;
@@ -32,6 +35,9 @@ public class CeleritasWorldRenderer extends SimpleWorldRenderer<World, Primitive
     }
 
     private final BlockEntityRenderContext blockEntityRenderContext = new BlockEntityRenderContext();
+
+    /** The terrain setup's frame number, counted up by each setupRender (the shadow pass's search uses the next one). */
+    public int frame;
 
     private static boolean glDebugInstalled;
 
@@ -121,7 +127,13 @@ public class CeleritasWorldRenderer extends SimpleWorldRenderer<World, Primitive
 
     @Override
     protected PrimitiveRenderSectionManager createRenderSectionManager(CommandList commandList) {
-        return PrimitiveRenderSectionManager.create(ChunkMeshFormats.VANILLA_LIKE, this.world, this.renderDistance, commandList);
+        return PrimitiveRenderSectionManager.create(TerrainPrograms.packFormat() ? PackChunkVertex.INSTANCE : ChunkMeshFormats.VANILLA_LIKE,
+                this.world, this.renderDistance, commandList);
+    }
+
+    @Override
+    public boolean isInShadowPass() {
+        return TerrainShadow.isActive();
     }
 
     @Override

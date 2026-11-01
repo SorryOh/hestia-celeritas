@@ -4,6 +4,7 @@ package org.taumc.celeritas.mixin.core;
 // markDirty keeps vanilla's private access and ignores updates before a world is loaded; the entity loop reuses its
 // BlockPos and reads the camera entity once per frame instead of once per entity.
 // Hestia build 10 (2026-10-23): setupRender moves the chunk tracker's window to the camera's column first.
+// Hestia build 12 (2026-11-01): the frame counter lives in CeleritasWorldRenderer, which TerrainShadow's search reads.
 
 import com.llamalad7.mixinextras.sugar.Local;
 import net.minecraft.client.Minecraft;
@@ -117,9 +118,6 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
         return 1;
     }
 
-    @Unique
-    private int frame = 0;
-
     /**
      * @reason Redirect the terrain setup phase to our renderer
      * @author JellySquid
@@ -143,7 +141,7 @@ public abstract class WorldRendererMixin implements RenderGlobalExtension {
         try {
             this.renderer.setupTerrain(((ViewportProvider) culler).sodium$createViewport(),
                     CeleritasWorldRenderer.captureCameraState(tickDelta),
-                    this.frame++, spectator, false);
+                    this.renderer.frame++, spectator, false);
         } finally {
             RenderDevice.exitManagedCode();
         }

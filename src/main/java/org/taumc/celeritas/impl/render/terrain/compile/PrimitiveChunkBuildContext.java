@@ -3,11 +3,15 @@ package org.taumc.celeritas.impl.render.terrain.compile;
 // Hestia build (2026-10-12): the 1.8.9 branch only, with gen2 names. The vertex data is read through one int view per
 // buffer instead of a new view per block; light values get vanilla's half-texel lightmap offset; no sprite
 // transparency tracker (pre-1.5 only); each builder thread keeps one WorldSlice and one BlockModelPipeline.
+// Hestia build 12 (2026-11-01): in the pack format the copied quads (fluids) get the block's mc_Entity, their middle
+// texture coordinate and their tangent too (PackVertex).
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.render.block.BlockRenderDispatcher;
 import net.minecraft.client.render.vertex.BufferBuilder;
 import net.minecraft.world.World;
+import org.taumc.celeritas.impl.render.terrain.PackChunkVertex;
+import org.taumc.celeritas.impl.render.terrain.PackVertex;
 import org.taumc.celeritas.impl.render.terrain.compile.pipeline.BlockModelPipeline;
 import org.taumc.celeritas.impl.world.WorldSlice;
 import org.embeddedt.embeddium.impl.model.quad.properties.ModelQuadFacing;
@@ -44,7 +48,10 @@ public class PrimitiveChunkBuildContext extends ChunkBuildContext {
         this.models = new BlockModelPipeline(dispatcher.getModelRenderer(), dispatcher.getModelShaper());
     }
 
-    private final ChunkVertexEncoder.Vertex[] vertices = ChunkVertexEncoder.Vertex.uninitializedQuad();
+    private final ChunkVertexEncoder.Vertex[] vertices = PackVertex.quad();
+
+    /** The block being copied's mc_Entity (PackVertex.entity), set by the meshing task in the pack format. */
+    public int entity;
 
     /**
      * The tessellator's vertex data as ints from index 0. The view is only rebuilt when the tessellator has grown its
@@ -74,6 +81,7 @@ public class PrimitiveChunkBuildContext extends ChunkBuildContext {
     }
 
     private void outputQuads(IntBuffer rawBuffer, ChunkVertexEncoder.Vertex[] celeritasVertices, int numQuads, ChunkBuildBuffers buffers, Material material) {
+        boolean packFormat = material.pass.vertexType() == PackChunkVertex.INSTANCE;
         int ptr = 0;
         for (int quadIdx = 0; quadIdx < numQuads; quadIdx++) {
             for (int vIdx = 0; vIdx < 4; vIdx++) {
@@ -94,6 +102,9 @@ public class PrimitiveChunkBuildContext extends ChunkBuildContext {
             int trueNormal = QuadUtil.calculateNormal(celeritasVertices);
             for (int vIdx = 0; vIdx < 4; vIdx++) {
                 celeritasVertices[vIdx].trueNormal = trueNormal;
+            }
+            if (packFormat) {
+                PackVertex.fillQuad(celeritasVertices, this.entity);
             }
             ModelQuadFacing facing = QuadUtil.findNormalFace(trueNormal);
             buffers.get(material).getVertexBuffer(facing).push(celeritasVertices, material);

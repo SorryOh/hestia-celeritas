@@ -4,6 +4,8 @@ package org.taumc.celeritas.impl.render.terrain.compile.pipeline;
 // off by default there), which lights quads with Celeritas's smooth-lighting pipeline and so looks different from
 // vanilla's. This one keeps vanilla 1.8.9's lighting exactly, by calling vanilla's own ambient occlusion code, and only
 // replaces where the quads go: straight into Celeritas's buffers instead of a BufferBuilder copied afterwards.
+// Hestia build 12 (2026-11-01): in the pack format (TerrainPrograms.setPackFormat) each quad also gets the block's
+// mc_Entity, its middle texture coordinate and its tangent (PackVertex); the materials come from the section's format.
 
 import net.minecraft.block.Block;
 import net.minecraft.block.state.BlockState;
@@ -28,6 +30,7 @@ import org.embeddedt.embeddium.impl.util.QuadUtil;
 import org.taumc.celeritas.api.BlockQuads;
 import org.taumc.celeritas.api.QuadSprites;
 import org.taumc.celeritas.impl.extensions.BakedQuadExtension;
+import org.taumc.celeritas.impl.render.terrain.PackVertex;
 import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderPassConfigurationBuilder;
 import org.taumc.celeritas.impl.texture.AnimatedSprites;
 
@@ -58,11 +61,16 @@ public class BlockModelPipeline {
     private final BlockModelRenderer.AmbientOcclusionFace ambientOcclusion;
     private final float[] faceShape = new float[DIRECTIONS.length * 2];
     private final BitSet faceFlags = new BitSet(3);
-    private final ChunkVertexEncoder.Vertex[] vertices = ChunkVertexEncoder.Vertex.uninitializedQuad();
+    private final ChunkVertexEncoder.Vertex[] vertices = PackVertex.quad();
     private final int[] colors = new int[4];
     private final BlockPos.Mutable neighborPos = new BlockPos.Mutable();
 
     private ChunkBuildBuffers buffers;
+    // The section's format's passes and materials, and whether that is the pack format (its quads carry PackVertex's).
+    private PrimitiveRenderPassConfigurationBuilder.Passes passes = PrimitiveRenderPassConfigurationBuilder.VANILLA_LIKE;
+    private boolean packFormat;
+    /** The block being rendered's mc_Entity (PackVertex.entity), set by the meshing task in the pack format. */
+    public int entity;
     // The section's animated sprites, for visible-only texture animation (VisibleSprites).
     private Collection<Object> animatedSprites;
     // The section's lowest corner, negated, as the BufferBuilder offset vanilla's chunk compile sets.
@@ -104,6 +112,9 @@ public class BlockModelPipeline {
      */
     public void begin(ChunkBuildBuffers buffers, Collection<Object> animatedSprites, int originX, int originY, int originZ) {
         this.buffers = buffers;
+        this.passes = PrimitiveRenderPassConfigurationBuilder.of(buffers.getRenderPassConfiguration().defaultSolidMaterial());
+        this.packFormat = this.passes == PrimitiveRenderPassConfigurationBuilder.PACK;
+        this.entity = 0;
         this.animatedSprites = animatedSprites;
         this.offsetX = -originX;
         this.offsetY = -originY;
@@ -128,10 +139,11 @@ public class BlockModelPipeline {
         // Opaque quads may move to the solid pass: the mipmapped one from cutout_mipped, one without mipmaps from
         // cutout. The translucent pass blends, so its quads stay.
         Material opaqueMaterial = null;
-        if (material == PrimitiveRenderPassConfigurationBuilder.CUTOUT_MIPPED_MATERIAL) {
-            opaqueMaterial = PrimitiveRenderPassConfigurationBuilder.SOLID_MATERIAL;
-        } else if (material == PrimitiveRenderPassConfigurationBuilder.CUTOUT_MATERIAL) {
-            opaqueMaterial = PrimitiveRenderPassConfigurationBuilder.SOLID_UNMIPPED_MATERIAL;
+        PrimitiveRenderPassConfigurationBuilder.Passes passes = this.passes;
+        if (material == passes.cutoutMippedMaterial) {
+            opaqueMaterial = passes.solidMaterial;
+        } else if (material == passes.cutoutMaterial) {
+            opaqueMaterial = passes.solidUnmippedMaterial;
         }
         // A plant's random offset moves its model off the block's boundaries.
         boolean checkNeighbors = block.getOffsetType() == Block.OffsetType.NONE;
@@ -497,7 +509,7 @@ public class BlockModelPipeline {
         if (this.animatedSprites != null && AnimatedSprites.isAnimated(to)) {
             this.animatedSprites.add(to);
         }
-        this.push(out, PrimitiveRenderPassConfigurationBuilder.CUTOUT_MIPPED_MATERIAL);
+        this.push(out, this.passes.cutoutMippedMaterial);
     }
 
     // Per-channel bilinear blend of four little-endian colors.
@@ -554,6 +566,9 @@ public class BlockModelPipeline {
         int trueNormal = QuadUtil.calculateNormal(quad);
         for (int v = 0; v < 4; v++) {
             quad[v].trueNormal = trueNormal;
+        }
+        if (this.packFormat) {
+            PackVertex.fillQuad(quad, this.entity);
         }
         ModelQuadFacing facing = QuadUtil.findNormalFace(trueNormal);
         this.buffers.get(material).getVertexBuffer(facing).push(quad, material);

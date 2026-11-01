@@ -180,6 +180,23 @@ every change. In short (2026-10-12):
   cutout_mipped layer (alpha test on) and a cutout pass at the cutout layer (the block atlas without mipmaps), whose
   blocks' quads stay in it. Kora uses both for shader packs, whose terrain programs expect vanilla's layers and read
   this format through Kora's patcher.
+- **Shader pack terrain** (2026-11-01, build 12), on top of build 11's programs:
+  - `TerrainPrograms.setPackFormat(true)` builds chunks in `PackChunkVertex`, Celeritas's VANILLA_LIKE vertex with what
+    shader packs read added and every attribute float or normalized (a GLSL 1.20 program reads it): light as vanilla's
+    lightmap coordinates (0-240, without the builders' half texel), the section's place in its region in place of
+    the draw id, the quad's normal, `at_tangent` (from the first triangle's edges and texture coordinates, `w` the
+    handedness), `mc_midTexCoord` (the mean of the quad's texture coordinates) and `mc_Entity` (the block's ID from
+    `setBlockIds`, by block state, else its numeric ID, and its render type). 52 bytes a vertex instead of 32. The
+    passes and materials exist once per format (`PrimitiveRenderPassConfigurationBuilder.Passes`); block models and
+    fluids fill the extras once per quad (`PackVertex`). Applies when the world renderer is made again.
+  - `TerrainPrograms.setShadowPass(true)` makes the world renderer with celeritas-common's second visibility search,
+    and `TerrainShadow` drives it: `setup` (the shadow camera's frustum planes, the camera's frustum for the camera's own
+    search; both start there, so vanilla's terrain setup then only uploads and draws), `draw` (a block layer from the
+    shadow lists with the shadow camera's matrices and the provider's "shadow_" programs, no SectionOcclusion test, no
+    pass drawn without a program) and `drawBlockEntities`. The shadow search uses no occlusion culling, and its
+    sections' rebuilds are scheduled like the camera's.
+  - `TerrainPrograms.setFogCulling(false)` keeps sections the fog hides in the camera's search (packs draw their own
+    fog); `ChunkBuilds.built()` counts uploaded section builds (Kora times the rebuild a format change causes).
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a

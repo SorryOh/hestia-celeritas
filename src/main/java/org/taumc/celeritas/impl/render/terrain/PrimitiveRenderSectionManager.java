@@ -12,6 +12,9 @@ package org.taumc.celeritas.impl.render.terrain;
 // Hestia build 9 (2026-10-21): whether build work is pending (ChunkBuilds), read without allocating.
 // Hestia build 10 (2026-10-23): the search distance kept for the chunk tracker's window (ViewChunkTracker).
 // Hestia build 11 (2026-11-01): another mod's programs draw the passes it gives one for (TerrainPrograms).
+// Hestia build 12 (2026-11-01): celeritas-common's shadow pass when TerrainPrograms asks for one (TerrainShadow): its
+// search and lists while TerrainShadow works, the provider's "shadow_" programs, no SectionOcclusion test there; fog
+// culling as TerrainPrograms says; uploaded builds counted (ChunkBuilds.built).
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceOpenHashMap;
 import net.minecraft.util.math.BlockPos;
@@ -50,6 +53,7 @@ import org.jetbrains.annotations.Nullable;
 import org.taumc.celeritas.api.CeleritasSettings;
 import org.taumc.celeritas.api.SectionOcclusion;
 import org.taumc.celeritas.api.TerrainPrograms;
+import org.taumc.celeritas.api.TerrainShadow;
 import org.taumc.celeritas.impl.render.terrain.compile.PrimitiveChunkBuildContext;
 import org.taumc.celeritas.impl.render.terrain.compile.task.ChunkBuilderMeshingTask;
 import org.taumc.celeritas.impl.render.terrain.fog.GLStateManagerFogService;
@@ -78,7 +82,8 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
     public final int searchDistance;
 
     public PrimitiveRenderSectionManager(RenderPassConfiguration<?> configuration, World world, int renderDistance, CommandList commandList, int minSection, int maxSection, int requestedThreads, boolean drawFoggedChunks) {
-        super(configuration, () -> new PrimitiveChunkBuildContext(world, configuration), ChunkRenderer::new, renderDistance, commandList, minSection, maxSection, requestedThreads, false);
+        super(configuration, () -> new PrimitiveChunkBuildContext(world, configuration), ChunkRenderer::new, renderDistance, commandList, minSection, maxSection, requestedThreads,
+                TerrainPrograms.shadowPass());
         this.world = world;
         this.sectionCache = new ClonedChunkSectionCache(world);
         this.drawFoggedChunks = drawFoggedChunks;
@@ -123,7 +128,14 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
 
     @Override
     protected boolean useFogOcclusion() {
-        return !this.drawFoggedChunks;
+        return !this.drawFoggedChunks && TerrainPrograms.fogCulling();
+    }
+
+    // celeritas-common asks which lists to work on (the search's rebuilds, the draws): the shadow pass's while
+    // TerrainShadow runs.
+    @Override
+    public boolean isInShadowPass() {
+        return TerrainShadow.isActive();
     }
 
     @Override
@@ -211,10 +223,16 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
         super.invalidateCachedSectionData(section);
     }
 
+    /** Sections whose new geometry was uploaded, by every manager (ChunkBuilds.built). Render thread. */
+    public static long builtSections;
+
     // Every upload of a rebuild's geometry and every new or removed section goes through here.
     @Override
     protected boolean updateSectionInfo(RenderSection render, @Nullable BuiltRenderSectionData info) {
         boolean changed = super.updateSectionInfo(render, info);
+        if (info != null) {
+            builtSections++;
+        }
         SectionOcclusion.geometryChanged(render.getChunkX(), render.getChunkY(), render.getChunkZ());
         return changed;
     }
@@ -292,10 +310,19 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
             shader.setTextureSlot(ChunkShaderTextureSlot.LIGHT, 1);
         }
 
-        // Another mod's section test (SectionOcclusion) leaves sections out of the draws: the lists are filtered once
-        // per frame and every pass draws from the filtered ones.
+        // Another mod's section test (SectionOcclusion) leaves sections out of the camera's draws: the lists are
+        // filtered once per frame and every pass draws from the filtered ones. The shadow pass draws its own lists
+        // unfiltered (casters behind walls still cast), and only the passes the provider gives a shadow program for.
         @Override
         public void render(ChunkRenderMatrices matrices, CommandList commandList, ChunkRenderListIterable renderLists, TerrainRenderPass pass, CameraTransform camera, CameraTransform previousCamera) {
+            if (TerrainShadow.isActive()) {
+                TerrainPrograms.Provider provider = TerrainPrograms.getProvider();
+                if (provider == null || this.packProgram(provider, pass, true) == null) {
+                    return;
+                }
+                super.render(matrices, commandList, renderLists, pass, camera, previousCamera);
+                return;
+            }
             SectionOcclusion.Test test = SectionOcclusion.getTest();
             if (test != null) {
                 renderLists = this.occluded.filter(renderLists, test);
@@ -304,17 +331,20 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
         }
 
         // Another mod's programs (TerrainPrograms) draw the passes it gives one for; asked for once per pass after each
-        // change of its generation, and kept here by pass (null: Celeritas's own for that pass).
+        // change of its generation, and kept here by pass (null: Celeritas's own for that pass, or none in the shadow
+        // pass, whose programs are kept apart).
         private final Map<TerrainRenderPass, PackChunkProgram> packPrograms = new Reference2ReferenceOpenHashMap<>();
+        private final Map<TerrainRenderPass, PackChunkProgram> shadowPrograms = new Reference2ReferenceOpenHashMap<>();
         private int packGeneration = -1;
         private PackChunkProgram activePack;
         private TerrainPrograms.Provider activeProvider;
+        private String activeName;
 
         @Override
         protected GlProgram<ChunkShaderInterface> compileProgram(ChunkShaderOptions options) {
             TerrainPrograms.Provider provider = TerrainPrograms.getProvider();
             if (provider != null) {
-                PackChunkProgram pack = this.packProgram(provider, options.pass());
+                PackChunkProgram pack = this.packProgram(provider, options.pass(), TerrainShadow.isActive());
                 if (pack != null) {
                     return pack;
                 }
@@ -322,22 +352,24 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
             return super.compileProgram(options);
         }
 
-        private PackChunkProgram packProgram(TerrainPrograms.Provider provider, TerrainRenderPass pass) {
+        private PackChunkProgram packProgram(TerrainPrograms.Provider provider, TerrainRenderPass pass, boolean shadow) {
             int generation = TerrainPrograms.generation();
             if (generation != this.packGeneration) {
                 this.packGeneration = generation;
                 this.dropPackPrograms();
             }
-            PackChunkProgram program = this.packPrograms.get(pass);
-            if (program == null && !this.packPrograms.containsKey(pass)) {
+            Map<TerrainRenderPass, PackChunkProgram> programs = shadow ? this.shadowPrograms : this.packPrograms;
+            PackChunkProgram program = programs.get(pass);
+            if (program == null && !programs.containsKey(pass)) {
                 int handle = 0;
+                String name = shadow ? "shadow_" + pass.name() : pass.name();
                 try {
-                    handle = provider.program(pass.name());
+                    handle = provider.program(name);
                 } catch (RuntimeException e) {
-                    LOGGER.error("The terrain program provider failed for the {} pass; Celeritas's own program draws it", pass.name(), e);
+                    LOGGER.error("The terrain program provider failed for the {} pass; {}", name, shadow ? "it isn't drawn" : "Celeritas's own program draws it", e);
                 }
                 program = handle != 0 ? new PackChunkProgram(handle) : null;
-                this.packPrograms.put(pass, program);
+                programs.put(pass, program);
             }
             return program;
         }
@@ -349,6 +381,12 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
                 }
             }
             this.packPrograms.clear();
+            for (PackChunkProgram program : this.shadowPrograms.values()) {
+                if (program != null) {
+                    program.delete();
+                }
+            }
+            this.shadowPrograms.clear();
         }
 
         @Override
@@ -358,7 +396,8 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
             if (provider != null && this.activeProgram instanceof PackChunkProgram pack) {
                 this.activePack = pack;
                 this.activeProvider = provider;
-                provider.begin(pass.name(), pack.handle());
+                this.activeName = TerrainShadow.isActive() ? "shadow_" + pass.name() : pass.name();
+                provider.begin(this.activeName, pack.handle());
             }
         }
 
@@ -369,7 +408,7 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
                 this.activePack = null;
                 TerrainPrograms.Provider provider = this.activeProvider;
                 this.activeProvider = null;
-                provider.end(pass.name(), pack.handle());
+                provider.end(this.activeName, pack.handle());
             }
             super.end(pass);
         }
