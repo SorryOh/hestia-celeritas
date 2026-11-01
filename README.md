@@ -181,6 +181,11 @@ every change. In short (2026-10-12):
     sections' rebuilds are scheduled like the camera's.
   - `TerrainPrograms.setFogCulling(false)` keeps sections the fog hides in the camera's search (packs draw their own
     fog); `ChunkBuilds.built()` counts uploaded section builds (Kora times the rebuild a format change causes).
+- **No face shade for packs that shade faces** (2026-11-01, build 13): `TerrainPrograms.setFaceShade(false)` makes
+  pack-format sections start each quad from white instead of its baked color, which in 1.8.9 holds only FaceBakery's
+  face shade (0.5 below, 0.8 north and south, 0.6 east and west): the vertex color is then the tint and ambient
+  occlusion, as OptiFine gives packs with Old Lighting off (`oldLighting=false`), which shade faces themselves.
+  Celeritas's own format always keeps the shade. Applies to sections built afterwards.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
