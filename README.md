@@ -200,6 +200,10 @@ every change. In short (2026-10-12):
   `TerrainShadow.setCameraCulling(true)` keeps only the sections the camera's frustum holds too, as OptiFine 1.8.9's
   shadow map does (Kora's probe: nothing behind or above the camera casts a shadow there). Off by default; Kora turns it
   on only in a dev run that compares with OptiFine, its own shadow map stays complete.
+- **AO in the alpha for packs that ask** (2026-11-02, build 17): `TerrainPrograms.setSeparateAo(true)` makes
+  pack-format quads lit with smooth lighting carry vanilla's AO factor in the vertex color's alpha and leave it out of
+  the rgb, as OptiFine 1.8.9 gives packs with `separateAo=true` (Kora's probe: the rgb the tint alone, the alpha the
+  AO); flat-lit quads keep an alpha of 1. Applies to sections built afterwards.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a

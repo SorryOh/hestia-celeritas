@@ -8,6 +8,8 @@ package org.taumc.celeritas.impl.render.terrain.compile.pipeline;
 // mc_Entity, its middle texture coordinate and its tangent (PackVertex); the materials come from the section's format.
 // Hestia build 13 (2026-11-01): in the pack format, quads can start from white instead of their baked color
 // (TerrainPrograms.setFaceShade), leaving out FaceBakery's face shade for packs that shade faces themselves.
+// Hestia build 17 (2026-11-02): in the pack format, the smooth-lighting AO can go to the color's alpha instead of its rgb
+// (TerrainPrograms.setSeparateAo), as OptiFine gives packs with separateAo=true.
 
 import net.minecraft.block.Block;
 import net.minecraft.block.state.BlockState;
@@ -75,6 +77,8 @@ public class BlockModelPipeline {
     // Whether quads start from their baked color, which holds FaceBakery's face shade; off for shader packs that shade
     // faces themselves (TerrainPrograms.setFaceShade): they start from white, as the shade is the baked color's only part.
     private boolean bakedShade = true;
+    // Whether the AO goes to the color's alpha instead of its rgb (TerrainPrograms.setSeparateAo; pack format only).
+    private boolean separateAo;
     /** The block being rendered's mc_Entity (PackVertex.entity), set by the meshing task in the pack format. */
     public int entity;
     // The section's animated sprites, for visible-only texture animation (VisibleSprites).
@@ -121,6 +125,7 @@ public class BlockModelPipeline {
         this.passes = PrimitiveRenderPassConfigurationBuilder.of(buffers.getRenderPassConfiguration().defaultSolidMaterial());
         this.packFormat = this.passes == PrimitiveRenderPassConfigurationBuilder.PACK;
         this.bakedShade = !this.packFormat || TerrainPrograms.faceShade();
+        this.separateAo = this.packFormat && TerrainPrograms.separateAo();
         this.entity = 0;
         this.animatedSprites = animatedSprites;
         this.offsetX = -originX;
@@ -244,11 +249,15 @@ public class BlockModelPipeline {
                 float green = (float) (tint >> 8 & 255) / 255.0F;
                 float blue = (float) (tint & 255) / 255.0F;
                 for (int v = 0; v < 4; v++) {
-                    this.colors[v] = multiplyColor(this.baked(data, v), shade[v] * red, shade[v] * green, shade[v] * blue);
+                    this.colors[v] = this.separateAo
+                            ? withAo(multiplyColor(this.baked(data, v), red, green, blue), shade[v])
+                            : multiplyColor(this.baked(data, v), shade[v] * red, shade[v] * green, shade[v] * blue);
                 }
             } else {
                 for (int v = 0; v < 4; v++) {
-                    this.colors[v] = multiplyColor(this.baked(data, v), shade[v], shade[v], shade[v]);
+                    this.colors[v] = this.separateAo
+                            ? withAo(this.baked(data, v), shade[v])
+                            : multiplyColor(this.baked(data, v), shade[v], shade[v], shade[v]);
                 }
             }
 
@@ -308,6 +317,11 @@ public class BlockModelPipeline {
             this.tintIndex = index;
         }
         return this.tint;
+    }
+
+    // A little-endian color with the AO factor (0-1) as its alpha: separateAo's vertex color.
+    private static int withAo(int color, float ao) {
+        return color & 0x00FFFFFF | Math.round(Math.max(0.0F, Math.min(1.0F, ao)) * 255.0F) << 24;
     }
 
     // BufferBuilder.multiplyColor on a little-endian color: red in the low byte.
@@ -394,9 +408,15 @@ public class BlockModelPipeline {
         return (Float.intBitsToFloat(this.handledData[v * 7 + 5]) - from.getVMin()) / (from.getVMax() - from.getVMin());
     }
 
-    // The vertex color of the handled quad: the baked color times the shade, times the tint (0xRRGGBB) unless -1.
+    // The vertex color of the handled quad: the baked color times the shade, times the tint (0xRRGGBB) unless -1; with
+    // separateAo the shade goes to the alpha instead.
     private int handledColor(int v, int tint) {
         float shade = this.handledShade[v];
+        if (this.separateAo) {
+            int color = tint < 0 ? this.baked(this.handledData, v) : multiplyColor(this.baked(this.handledData, v),
+                    (float) (tint >> 16 & 255) / 255.0F, (float) (tint >> 8 & 255) / 255.0F, (float) (tint & 255) / 255.0F);
+            return withAo(color, shade);
+        }
         if (tint < 0) {
             return multiplyColor(this.baked(this.handledData, v), shade, shade, shade);
         }
