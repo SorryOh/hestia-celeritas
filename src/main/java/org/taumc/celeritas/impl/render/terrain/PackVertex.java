@@ -35,9 +35,10 @@ public final class PackVertex extends ChunkVertexEncoder.Vertex {
     /**
      * Fills the pack attributes of a finished quad: its positions, texture coordinates and {@code trueNormal} are
      * set, {@code entity} is the block's. The tangent is the direction of increasing u on the plane of the first
-     * triangle (its edges against their texture coordinate deltas), normalized; its handedness says whether
-     * normal × tangent points along increasing v. Quads whose texture coordinates don't span the triangle get the
-     * tangent of a flat face (+x, or +z for faces along x) instead.
+     * triangle (its edges against their texture coordinate deltas), normalized; its handedness is 1 unless
+     * tangent × normal points against increasing v (-1), as OptiFine 1.8.9 gives it (Kora's probe: 1 on every
+     * block face and the water, whose v runs down the texture). Quads whose texture coordinates don't span the
+     * triangle get the tangent of a flat face (+x, or +z for faces along x) instead, handedness 1.
      */
     public static void fillQuad(ChunkVertexEncoder.Vertex[] quad, int entity) {
         ChunkVertexEncoder.Vertex v0 = quad[0], v1 = quad[1], v2 = quad[2], v3 = quad[3];
@@ -64,8 +65,8 @@ public final class PackVertex extends ChunkVertexEncoder.Vertex {
             float bx = (e2x * du1 - e1x * du2) * r;
             float by = (e2y * du1 - e1y * du2) * r;
             float bz = (e2z * du1 - e1z * du2) * r;
-            // (n x t) . b
-            float cx = ny * tz - nz * ty, cy = nz * tx - nx * tz, cz = nx * ty - ny * tx;
+            // (t x n) . b (build 12 took n x t: every face's handedness came out the opposite of OptiFine's)
+            float cx = ty * nz - tz * ny, cy = tz * nx - tx * nz, cz = tx * ny - ty * nx;
             w = cx * bx + cy * by + cz * bz < 0.0F ? -1.0F : 1.0F;
         } else {
             tx = Math.abs(nx) > 0.9F ? 0.0F : 1.0F;

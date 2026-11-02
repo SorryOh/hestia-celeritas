@@ -209,6 +209,10 @@ every change. In short (2026-10-12):
   probe mapped OptiFine's columns from 180 blocks up: Celeritas's cylinder drew no ground there, and reached a little
   farther at the edge). celeritas-common's `OcclusionCuller.isWithinRenderDistance` and `RegionCullCache.compute` are
   overridden while it's on; fogged corners are left out.
+- **`at_tangent`'s handedness as OptiFine's** (2026-11-02, build 15): the pack format's tangent w is the sign of
+  (tangent × normal) · bitangent, 1 on 1.8.9's block faces and the water; build 12 took normal × tangent, so every
+  face had -1 where OptiFine gives 1, and packs that build a bitangent from it (BSL's water normals) mirrored their
+  normal maps. Applies to sections built afterwards.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
