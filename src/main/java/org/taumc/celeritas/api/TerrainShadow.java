@@ -1,6 +1,7 @@
 package org.taumc.celeritas.api;
 
 // Hestia build 12 (2026-11-01): new, for Kora's shader packs.
+// Hestia build 16 (2026-11-02): setCameraCulling (the shadow search kept to the camera's frustum, as OptiFine's).
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.render.Culler;
@@ -13,6 +14,7 @@ import org.embeddedt.embeddium.impl.render.viewport.ViewportProvider;
 import org.joml.Vector3d;
 import org.taumc.celeritas.impl.render.terrain.CameraFrustum;
 import org.taumc.celeritas.impl.render.terrain.CeleritasWorldRenderer;
+import org.taumc.celeritas.impl.render.terrain.IntersectedFrustum;
 import org.taumc.celeritas.impl.render.terrain.PrimitiveRenderSectionManager;
 import org.taumc.celeritas.impl.render.terrain.matrix.PrimitiveChunkMatrixGetter;
 
@@ -33,8 +35,18 @@ public final class TerrainShadow {
 
     // Used in turn, as the camera's: last frame's may still be read by the search thread until this frame's setup joins it.
     private static final CameraFrustum[] FRUSTUMS = { new CameraFrustum(), new CameraFrustum() };
+    private static final IntersectedFrustum[] INTERSECTED = { new IntersectedFrustum(), new IntersectedFrustum() };
     private static int nextFrustum;
     private static final Vector3d POSITION = new Vector3d();
+    private static volatile boolean cameraCulling;
+
+    /**
+     * Keeps the shadow search to the sections the camera's frustum holds too (off by default), as OptiFine 1.8.9's
+     * shadow map holds only what the camera sees: for comparing with it; the complete search is the right one.
+     */
+    public static void setCameraCulling(boolean on) {
+        cameraCulling = on;
+    }
 
     /** True while the shadow pass's search or draws run: Celeritas works on the shadow lists then. */
     public static boolean isActive() {
@@ -75,8 +87,10 @@ public final class TerrainShadow {
             double feetY = view.prevY + (view.y - view.prevY) * tickDelta;
             double feetZ = view.prevZ + (view.z - view.prevZ) * tickDelta;
             CameraFrustum frustum = FRUSTUMS[nextFrustum].set(planes, eye.x - feetX, eye.y - feetY, eye.z - feetZ);
+            IntersectedFrustum both = INTERSECTED[nextFrustum].set(frustum, camera.getFrustum());
             nextFrustum ^= 1;
-            Viewport shadow = new Viewport(frustum, POSITION.set(eye.x, eye.y, eye.z));
+            // Both test boxes relative to the eye.
+            Viewport shadow = new Viewport(cameraCulling ? both : frustum, POSITION.set(eye.x, eye.y, eye.z));
             active = true;
             try {
                 renderer.setupShadowTerrain(camera, shadow, CeleritasWorldRenderer.captureCameraState(tickDelta), renderer.frame, spectator);
