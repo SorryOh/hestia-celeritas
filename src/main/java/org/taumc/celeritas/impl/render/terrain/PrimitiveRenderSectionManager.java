@@ -92,7 +92,8 @@ public class PrimitiveRenderSectionManager extends RenderSectionManager {
 
     public static PrimitiveRenderSectionManager create(ChunkVertexType vertexType, World world, int renderDistance, CommandList commandList) {
         int maxSection = world.getHeight() / 16;
-        boolean drawFoggedChunks = CeleritasSettings.drawFoggedChunks;
+        // The flat render distance (Hestia build 14) measures from the render distance itself: no fogged corners then.
+        boolean drawFoggedChunks = CeleritasSettings.drawFoggedChunks && !TerrainPrograms.flatRenderDistance();
         // The section search is a circle; vanilla draws the whole square of loaded chunks, whose corners lie up to
         // sqrt(2) times as far. The search and the chunk tracker's window (ViewChunkTracker) use this distance.
         int searchDistance = drawFoggedChunks ? (int) Math.ceil(renderDistance * Math.sqrt(2.0)) : renderDistance;
