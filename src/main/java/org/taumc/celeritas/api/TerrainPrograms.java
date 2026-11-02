@@ -49,6 +49,7 @@ public final class TerrainPrograms {
     private static volatile boolean shadowPass;
     private static volatile boolean fogCulling = true;
     private static volatile boolean faceShade = true;
+    private static volatile boolean flatRenderDistance;
     private static volatile short[] blockIds;
 
     /** Sets the provider (null: Celeritas's own programs, at no cost); every pass asks it again. */
@@ -177,5 +178,19 @@ public final class TerrainPrograms {
 
     public static boolean faceShade() {
         return faceShade;
+    }
+
+    /**
+     * Whether the camera's search keeps the chunk columns OptiFine 1.8.9 draws with a shader pack instead of
+     * Celeritas's cylinder: every section of a column whose origin (its lowest x and z) lies within the render distance
+     * of the camera's block, measured flat, with no limit above or below (a camera 180 blocks above the ground still
+     * draws it). Read by each search; the render distance is the search's own, so leave fogged chunks out while it's on.
+     */
+    public static void setFlatRenderDistance(boolean on) {
+        flatRenderDistance = on;
+    }
+
+    public static boolean flatRenderDistance() {
+        return flatRenderDistance;
     }
 }

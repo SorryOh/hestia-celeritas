@@ -12,6 +12,8 @@
     "core.FaceBakeryMixin",
     "core.FrustumCullerMixin",
     "core.MultiplayerChunkCacheMixin",
+    "core.OcclusionCullerMixin",
+    "core.RegionCullCacheMixin",
     "core.RenderChunkStorageMixin",
     "core.RenderListManagerAccessor",
     "core.RenderSectionManagerAccessor",

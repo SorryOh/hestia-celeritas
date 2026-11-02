@@ -203,6 +203,12 @@ every change. In short (2026-10-12):
   face shade (0.5 below, 0.8 north and south, 0.6 east and west): the vertex color is then the tint and ambient
   occlusion, as OptiFine gives packs with Old Lighting off (`oldLighting=false`), which shade faces themselves.
   Celeritas's own format always keeps the shade. Applies to sections built afterwards.
+- **OptiFine's chunks for packs** (2026-11-02, build 14): `TerrainPrograms.setFlatRenderDistance(true)` makes the
+  camera's search keep the chunk columns OptiFine 1.8.9 draws with a shader pack: every section of a column whose
+  origin lies within the render distance of the camera's block, measured flat, with no limit above or below (Kora's
+  probe mapped OptiFine's columns from 180 blocks up: Celeritas's cylinder drew no ground there, and reached a little
+  farther at the edge). celeritas-common's `OcclusionCuller.isWithinRenderDistance` and `RegionCullCache.compute` are
+  overridden while it's on; fogged corners are left out.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
