@@ -49,6 +49,7 @@ public final class TerrainPrograms {
     private static volatile boolean shadowPass;
     private static volatile boolean fogCulling = true;
     private static volatile boolean faceShade = true;
+    private static volatile boolean separateAo;
     private static volatile boolean flatRenderDistance;
     private static volatile short[] blockIds;
 
@@ -178,6 +179,20 @@ public final class TerrainPrograms {
 
     public static boolean faceShade() {
         return faceShade;
+    }
+
+    /**
+     * Whether pack-format terrain carries its smooth-lighting ambient occlusion in the vertex color's alpha instead of
+     * its rgb, as OptiFine 1.8.9 gives shader packs that ask for it ({@code separateAo=true}): the rgb is then the
+     * tint (and the face shade, when kept), the alpha vanilla's AO factor; quads lit flat keep an alpha of 1. Takes
+     * effect for sections built afterwards: reload the chunks after changing it.
+     */
+    public static void setSeparateAo(boolean on) {
+        separateAo = on;
+    }
+
+    public static boolean separateAo() {
+        return separateAo;
     }
 
     /**
