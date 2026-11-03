@@ -13,6 +13,7 @@ package org.taumc.celeritas.impl.render.terrain.compile.task;
 //   visible sections report every frame (VisibleSectionSpriteTicker); upstream's 1.8.9 branch listed none.
 // Hestia build 12 (2026-11-01): in the pack format each block's quads carry its mc_Entity (TerrainPrograms.setBlockIds,
 // else the block's numeric ID, and its render type).
+// Hestia build 20 (2026-11-03): the task timed while ChunkBuilds.setTiming asks (a chunk build budget).
 
 import it.unimi.dsi.fastutil.objects.Reference2ReferenceMap;
 import net.minecraft.block.Block;
@@ -42,6 +43,7 @@ import org.embeddedt.embeddium.impl.render.chunk.terrain.TerrainRenderPass;
 import org.embeddedt.embeddium.impl.util.task.CancellationToken;
 import org.joml.Vector3d;
 import org.lwjgl.opengl.GL11C;
+import org.taumc.celeritas.api.ChunkBuilds;
 import org.taumc.celeritas.api.TerrainPrograms;
 import org.taumc.celeritas.impl.render.terrain.PackChunkVertex;
 import org.taumc.celeritas.impl.render.terrain.PackVertex;
@@ -66,6 +68,8 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
 
     @Override
     public ChunkBuildOutput execute(ChunkBuildContext context, CancellationToken cancellationToken) {
+        boolean timed = ChunkBuilds.timing();
+        long start = timed ? System.nanoTime() : 0L;
         PrimitiveChunkBuildContext buildContext = (PrimitiveChunkBuildContext)context;
         WorldSlice slice = buildContext.slice;
         slice.copyData(this.renderContext);
@@ -74,6 +78,9 @@ public class ChunkBuilderMeshingTask extends ChunkBuilderTask<ChunkBuildOutput> 
             return this.build(buildContext, slice, cancellationToken);
         } finally {
             slice.reset();
+            if (timed) {
+                ChunkBuilds.addTask(System.nanoTime() - start);
+            }
         }
     }
 

@@ -230,6 +230,10 @@ every change. In short (2026-10-12):
   connected textures overlay upright on a quad whose model mirrors its texture (vanilla's `stone_mirrored`): OptiFine
   1.8.9 M5 draws them upright there (Kora's gallery, case O2). The other `overlay`s keep the quad's own orientation;
   nothing else changes.
+- **Build tasks timed, when asked** (2026-11-03, build 20): `ChunkBuilds.setTiming(true)` makes every section's meshing
+  task add its wall time on its worker thread to `ChunkBuilds.taskNanos()` (and count itself in `tasksTimed()`), for
+  Kora's chunk build budget (connected textures on against off): Windows counts a thread's CPU time in 15.6 ms ticks,
+  too coarse for a rebuild of a few hundred ms. Off by default (a volatile read per task); nothing else changes.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
