@@ -2,6 +2,8 @@ package org.taumc.celeritas.api;
 
 // Hestia build 12 (2026-11-01): new, for Kora's shader packs.
 // Hestia build 16 (2026-11-02): setCameraCulling (the shadow search kept to the camera's frustum, as OptiFine's).
+// Hestia build 21 (2026-11-03): setup with more planes than the shadow camera's six, and its search's lists drawn in
+// the same frame when asked.
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.render.Culler;
@@ -25,7 +27,7 @@ import org.taumc.celeritas.impl.render.terrain.matrix.PrimitiveChunkMatrixGetter
  * renderer made with {@link TerrainPrograms#setShadowPass} on. Each frame, on the render thread: {@link #setup} once,
  * after the camera transform is set up and before vanilla's terrain setup ({@code WorldRenderer.setupRender}), then
  * {@link #draw} per block layer and {@link #drawBlockEntities}. The search runs on Celeritas's search thread like the
- * camera's, so its lists follow the shadow camera one frame late.
+ * camera's, so its lists follow the shadow camera one frame late, unless {@link #setup} is asked to wait for it.
  */
 public final class TerrainShadow {
     private TerrainShadow() {
@@ -72,6 +74,17 @@ public final class TerrainShadow {
      * {@code a x + b y + c z + d > 0} for all six. Returns false, doing nothing, when there is no shadow pass.
      */
     public static boolean setup(Culler cameraCuller, float[][] planes, float tickDelta, boolean spectator) {
+        return setup(cameraCuller, planes, 6, tickDelta, spectator, false);
+    }
+
+    /**
+     * {@link #setup(Culler, float[][], float, boolean)} with the first {@code count} of {@code planes} (at most
+     * {@link CameraFrustum#MAX_PLANES}; the shadow camera's six and any others): a section is searched when inside all,
+     * so the caller can narrow the shadow set (Kora keeps the casters whose shadows can fall in the camera's view). With
+     * {@code sameFrame}, setup waits for the search it started, and {@link #draw} draws its lists this frame instead of
+     * the next (the camera's own search is waited for too when one started here).
+     */
+    public static boolean setup(Culler cameraCuller, float[][] planes, int count, float tickDelta, boolean spectator, boolean sameFrame) {
         CeleritasWorldRenderer renderer = CeleritasWorldRenderer.instanceNullable();
         PrimitiveRenderSectionManager manager = renderer != null ? renderer.getRenderSectionManager() : null;
         Entity view = Minecraft.getInstance().getCamera();
@@ -86,7 +99,7 @@ public final class TerrainShadow {
             double feetX = view.prevX + (view.x - view.prevX) * tickDelta;
             double feetY = view.prevY + (view.y - view.prevY) * tickDelta;
             double feetZ = view.prevZ + (view.z - view.prevZ) * tickDelta;
-            CameraFrustum frustum = FRUSTUMS[nextFrustum].set(planes, eye.x - feetX, eye.y - feetY, eye.z - feetZ);
+            CameraFrustum frustum = FRUSTUMS[nextFrustum].set(planes, count, eye.x - feetX, eye.y - feetY, eye.z - feetZ);
             IntersectedFrustum both = INTERSECTED[nextFrustum].set(frustum, camera.getFrustum());
             nextFrustum ^= 1;
             // Both test boxes relative to the eye.
@@ -94,6 +107,10 @@ public final class TerrainShadow {
             active = true;
             try {
                 renderer.setupShadowTerrain(camera, shadow, CeleritasWorldRenderer.captureCameraState(tickDelta), renderer.frame, spectator);
+                if (sameFrame) {
+                    // The searches just started, joined: their lists are this frame's (the next setup finds none pending).
+                    manager.finishAllGraphUpdates();
+                }
             } finally {
                 active = false;
             }
