@@ -394,12 +394,17 @@ public class BlockModelPipeline {
 
         @Override
         public void overlay(TextureAtlasSprite sprite, int color, boolean fullBright) {
-            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright, false);
+            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright, false, 0, false);
         }
 
         @Override
         public void overlay(TextureAtlasSprite sprite, int color, boolean fullBright, boolean translucent) {
-            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright, translucent);
+            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright, translucent, 0, false);
+        }
+
+        @Override
+        public void overlay(TextureAtlasSprite sprite, int color, boolean fullBright, boolean translucent, int rotation, boolean flip) {
+            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright, translucent, rotation, flip);
         }
     }
 
@@ -525,8 +530,9 @@ public class BlockModelPipeline {
     private final int[] cornerIndex = new int[4];
     private final int[] vertexAtCorner = new int[4];
 
-    // An overlay quad over the handled one: in the cutout pass, or the translucent one (blended, as stained glass).
-    private void emitOverlay(TextureAtlasSprite to, int color, boolean fullBright, boolean translucent) {
+    // An overlay quad over the handled one: in the cutout pass, or the translucent one (blended, as stained glass); its
+    // texture turned and mirrored as emitHandled turns one.
+    private void emitOverlay(TextureAtlasSprite to, int color, boolean fullBright, boolean translucent, int rotation, boolean flip) {
         ChunkVertexEncoder.Vertex[] out = this.vertices;
         int[] data = this.handledData;
         for (int v = 0; v < 4; v++) {
@@ -535,8 +541,18 @@ public class BlockModelPipeline {
             vertex.x = this.blockX + Float.intBitsToFloat(data[base]);
             vertex.y = this.blockY + Float.intBitsToFloat(data[base + 1]);
             vertex.z = this.blockZ + Float.intBitsToFloat(data[base + 2]);
-            vertex.u = to.getUMin() + this.handledS(v) * (to.getUMax() - to.getUMin());
-            vertex.v = to.getVMin() + this.handledT(v) * (to.getVMax() - to.getVMin());
+            float s = this.handledS(v);
+            float t = this.handledT(v);
+            for (int r = rotation & 3; r > 0; r--) {
+                float turned = t;
+                t = 1.0F - s;
+                s = turned;
+            }
+            if (flip) {
+                s = 1.0F - s;
+            }
+            vertex.u = to.getUMin() + s * (to.getUMax() - to.getUMin());
+            vertex.v = to.getVMin() + t * (to.getVMax() - to.getVMin());
             if (fullBright) {
                 vertex.color = data[base + 3] | 0x00FFFFFF;
                 vertex.light = 0x00F000F0 + LIGHTMAP_TEXEL_CENTRE;
