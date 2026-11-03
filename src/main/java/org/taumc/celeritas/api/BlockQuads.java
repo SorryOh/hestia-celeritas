@@ -4,6 +4,7 @@ package org.taumc.celeritas.api;
 // natural textures (turned and mirrored textures), better grass, connected textures' overlay and compact methods,
 // emissive block textures and custom block colors.
 // Hestia build 18 (2026-11-03): overlays in the translucent pass (connected textures' layer=translucent).
+// Hestia build 19 (2026-11-03): overlays turned and mirrored (connected textures' overlays on mirrored stone).
 
 import net.minecraft.block.state.BlockState;
 import net.minecraft.client.render.model.block.BakedQuad;
@@ -63,6 +64,13 @@ public final class BlockQuads {
          * beneath, as stained glass is, instead of cut out where the alpha test fails); in the cutout pass otherwise.
          */
         void overlay(TextureAtlasSprite sprite, int color, boolean fullBright, boolean translucent);
+
+        /**
+         * The same, its texture turned {@code rotation} quarter turns and then mirrored when {@code flip}, as
+         * {@link #quad} turns one: to draw the extra quad's texture another way than the quad's own (a model that turns
+         * or mirrors its texture).
+         */
+        void overlay(TextureAtlasSprite sprite, int color, boolean fullBright, boolean translucent, int rotation, boolean flip);
     }
 
     private static volatile Handler handler;

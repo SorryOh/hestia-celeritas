@@ -208,6 +208,11 @@ every change. In short (2026-10-12):
   puts the extra quad in the translucent pass when `translucent` (blended by its alpha over the face beneath, as
   stained glass is) instead of the cutout pass, for Kora's connected textures' `layer=translucent` overlays. The
   three-argument `overlay` stays in the cutout pass; no pass is added (the pack format's translucent pass draws them).
+- **Turned and mirrored overlays** (2026-11-03, build 19): `BlockQuads.Output.overlay(sprite, color, fullBright,
+  translucent, rotation, flip)` turns and mirrors the extra quad's texture as `quad` turns one, so Kora can draw a
+  connected textures overlay upright on a quad whose model mirrors its texture (vanilla's `stone_mirrored`): OptiFine
+  1.8.9 M5 draws them upright there (Kora's gallery, case O2). The other `overlay`s keep the quad's own orientation;
+  nothing else changes.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
