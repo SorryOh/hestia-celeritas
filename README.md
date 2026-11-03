@@ -234,6 +234,11 @@ every change. In short (2026-10-12):
   task add its wall time on its worker thread to `ChunkBuilds.taskNanos()` (and count itself in `tasksTimed()`), for
   Kora's chunk build budget (connected textures on against off): Windows counts a thread's CPU time in 15.6 ms ticks,
   too coarse for a rebuild of a few hundred ms. Off by default (a volatile read per task); nothing else changes.
+- **A narrower shadow search, and its lists in the same frame** (2026-11-03, build 21): `TerrainShadow.setup` takes up to
+  24 planes (`count`) instead of the shadow camera's six, a section searched when inside all of them, so Kora can keep
+  only the casters whose shadows can fall in the camera's view; with `sameFrame` it waits for the searches it started
+  (`finishAllGraphUpdates`), so this frame draws their lists instead of the next (for a frame whose view left the margin
+  the last search had). The six-plane `setup` is unchanged, one frame late as before.
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a

@@ -13,9 +13,16 @@ import org.embeddedt.embeddium.impl.render.viewport.frustum.Frustum;
  * <p>
  * The test is vanilla's (a box is outside when all its corners are behind one plane), done with the corner farthest
  * along each plane's normal; the nearest corner tells whether the box is fully inside.
+ * <p>
+ * Hestia build 21 (2026-11-03): up to {@link #MAX_PLANES} planes instead of six, for a shadow search the caller narrows
+ * (TerrainShadow.setup's count).
  */
 public final class CameraFrustum implements Frustum {
-    private final float[] planes = new float[24];
+    /** The most planes one frustum holds. */
+    public static final int MAX_PLANES = 24;
+
+    private final float[] planes = new float[MAX_PLANES * 4];
+    private int count = 6;
     private double offsetX, offsetY, offsetZ;
 
     /**
@@ -23,9 +30,18 @@ public final class CameraFrustum implements Frustum {
      * @param offsetX offset from the camera entity's feet to the eye
      */
     public CameraFrustum set(float[][] frustumPlanes, double offsetX, double offsetY, double offsetZ) {
-        for (int i = 0; i < 6; i++) {
+        return this.set(frustumPlanes, 6, offsetX, offsetY, offsetZ);
+    }
+
+    /** The first {@code count} planes of {@code frustumPlanes}, each {a, b, c, d}; a box is inside when inside all. */
+    public CameraFrustum set(float[][] frustumPlanes, int count, double offsetX, double offsetY, double offsetZ) {
+        if (count < 1 || count > MAX_PLANES) {
+            throw new IllegalArgumentException("A frustum takes 1 to " + MAX_PLANES + " planes, not " + count);
+        }
+        for (int i = 0; i < count; i++) {
             System.arraycopy(frustumPlanes[i], 0, this.planes, i * 4, 4);
         }
+        this.count = count;
         this.offsetX = offsetX;
         this.offsetY = offsetY;
         this.offsetZ = offsetZ;
@@ -42,8 +58,9 @@ public final class CameraFrustum implements Frustum {
         double x0 = minX + this.offsetX, y0 = minY + this.offsetY, z0 = minZ + this.offsetZ;
         double x1 = maxX + this.offsetX, y1 = maxY + this.offsetY, z1 = maxZ + this.offsetZ;
         float[] planes = this.planes;
+        int end = this.count * 4;
         boolean fullyInside = true;
-        for (int i = 0; i < 24; i += 4) {
+        for (int i = 0; i < end; i += 4) {
             double a = planes[i], b = planes[i + 1], c = planes[i + 2], d = planes[i + 3];
             double far = a * (a >= 0 ? x1 : x0) + b * (b >= 0 ? y1 : y0) + c * (c >= 0 ? z1 : z0) + d;
             if (far <= 0.0) {
