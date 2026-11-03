@@ -10,6 +10,7 @@ package org.taumc.celeritas.impl.render.terrain.compile.pipeline;
 // (TerrainPrograms.setFaceShade), leaving out FaceBakery's face shade for packs that shade faces themselves.
 // Hestia build 17 (2026-11-02): in the pack format, the smooth-lighting AO can go to the color's alpha instead of its rgb
 // (TerrainPrograms.setSeparateAo), as OptiFine gives packs with separateAo=true.
+// Hestia build 18 (2026-11-03): a BlockQuads overlay can go to the translucent pass (connected textures' layer=translucent).
 
 import net.minecraft.block.Block;
 import net.minecraft.block.state.BlockState;
@@ -393,7 +394,12 @@ public class BlockModelPipeline {
 
         @Override
         public void overlay(TextureAtlasSprite sprite, int color, boolean fullBright) {
-            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright);
+            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright, false);
+        }
+
+        @Override
+        public void overlay(TextureAtlasSprite sprite, int color, boolean fullBright, boolean translucent) {
+            BlockModelPipeline.this.emitOverlay(sprite, color, fullBright, translucent);
         }
     }
 
@@ -519,7 +525,8 @@ public class BlockModelPipeline {
     private final int[] cornerIndex = new int[4];
     private final int[] vertexAtCorner = new int[4];
 
-    private void emitOverlay(TextureAtlasSprite to, int color, boolean fullBright) {
+    // An overlay quad over the handled one: in the cutout pass, or the translucent one (blended, as stained glass).
+    private void emitOverlay(TextureAtlasSprite to, int color, boolean fullBright, boolean translucent) {
         ChunkVertexEncoder.Vertex[] out = this.vertices;
         int[] data = this.handledData;
         for (int v = 0; v < 4; v++) {
@@ -541,7 +548,7 @@ public class BlockModelPipeline {
         if (this.animatedSprites != null && AnimatedSprites.isAnimated(to)) {
             this.animatedSprites.add(to);
         }
-        this.push(out, this.passes.cutoutMippedMaterial);
+        this.push(out, translucent ? this.passes.translucentMaterial : this.passes.cutoutMippedMaterial);
     }
 
     // Per-channel bilinear blend of four little-endian colors.
