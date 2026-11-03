@@ -3,6 +3,7 @@ package org.taumc.celeritas.api;
 // Hestia build (2026-10-14): new, for Hestia's resource pack features that change block quads while chunks are built:
 // natural textures (turned and mirrored textures), better grass, connected textures' overlay and compact methods,
 // emissive block textures and custom block colors.
+// Hestia build 18 (2026-11-03): overlays in the translucent pass (connected textures' layer=translucent).
 
 import net.minecraft.block.state.BlockState;
 import net.minecraft.client.render.model.block.BakedQuad;
@@ -56,6 +57,12 @@ public final class BlockQuads {
          * {@code fullBright}, lit at full brightness and not shaded, for glowing parts.
          */
         void overlay(TextureAtlasSprite sprite, int color, boolean fullBright);
+
+        /**
+         * The same, in the translucent pass when {@code translucent} (its pixels blended by their alpha over what is
+         * beneath, as stained glass is, instead of cut out where the alpha test fails); in the cutout pass otherwise.
+         */
+        void overlay(TextureAtlasSprite sprite, int color, boolean fullBright, boolean translucent);
     }
 
     private static volatile Handler handler;

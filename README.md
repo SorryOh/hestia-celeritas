@@ -221,6 +221,10 @@ every change. In short (2026-10-12):
   pack-format quads lit with smooth lighting carry vanilla's AO factor in the vertex color's alpha and leave it out of
   the rgb, as OptiFine 1.8.9 gives packs with `separateAo=true` (Kora's probe: the rgb the tint alone, the alpha the
   AO); flat-lit quads keep an alpha of 1. Applies to sections built afterwards.
+- **Translucent overlays** (2026-11-03, build 18): `BlockQuads.Output.overlay(sprite, color, fullBright, translucent)`
+  puts the extra quad in the translucent pass when `translucent` (blended by its alpha over the face beneath, as
+  stained glass is) instead of the cutout pass, for Kora's connected textures' `layer=translucent` overlays. The
+  three-argument `overlay` stays in the cutout pass; no pass is added (the pack format's translucent pass draws them).
 - **Visible-only texture animation:** every frame, the visible sections report the animated sprites they use to
   `org.taumc.celeritas.api.VisibleSprites`, where another mod (Hestia) can listen and advance only those sprites; with
   no listener nothing changes. celeritas-common's `GenericSectionSpriteTicker` marks the sprites of every section of a
